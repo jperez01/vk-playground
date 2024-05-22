@@ -1,2 +1,5 @@
 /build
 /bin
+/cmake-build-debug
+/cmake-build-relwithdebinfo
+/.idea

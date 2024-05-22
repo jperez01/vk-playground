@@ -1,0 +1,8 @@
+{
+  "dependencies": [
+    "assimp",
+    "lz4",
+    "sdl2",
+    "efsw"
+  ]
+}
