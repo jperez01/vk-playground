@@ -1,1 +1,0 @@
-Vulkan tutorial guide with a hands on, step by step, approach. 
