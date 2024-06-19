@@ -1,0 +1,6 @@
+/build
+/bin
+/assets/
+cmake-build-relwithdebinfo
+cmake-build-debug
+.idea
