@@ -400,7 +400,7 @@ void VulkanEngine::draw()
 	presentInfo.pImageIndices = &swapchainImageIndex;
 
 	VkResult presentResult = vkQueuePresentKHR(_graphicsQueue, &presentInfo);
-	if (e == VK_ERROR_OUT_OF_DATE_KHR) {
+	if (presentResult == VK_ERROR_OUT_OF_DATE_KHR) {
         resize_requested = true;
         return;
 	}
