@@ -134,68 +134,68 @@ struct MeshNode : public Node {
 
 class VulkanEngine {
 public:
-    bool _isInitialized { false };
-    int _frameNumber { 0 };
+    bool isInitialized { false };
+    int frameNumber { 0 };
 
-    VkExtent2D _windowExtent { 1700, 900 };
+    VkExtent2D windowExtent { 1700, 900 };
 
-    struct SDL_Window* _window { nullptr };
+    struct SDL_Window* window { nullptr };
 
-    VkInstance _instance;
-    VkDebugUtilsMessengerEXT _debug_messenger;
-    VkPhysicalDevice _chosenGPU;
-    VkDevice _device;
+    VkInstance instance;
+    VkDebugUtilsMessengerEXT debug_messenger;
+    VkPhysicalDevice chosenGPU;
+    VkDevice device;
 
-    VkQueue _graphicsQueue;
-    uint32_t _graphicsQueueFamily;
+    VkQueue graphicsQueue;
+    uint32_t graphicsQueueFamily;
 
-    AllocatedBuffer _defaultGLTFMaterialData;
+    AllocatedBuffer defaultGLTFMaterialData;
 
-    FrameData _frames[FRAME_OVERLAP];
+    FrameData frames[FRAME_OVERLAP];
 
-    VkSurfaceKHR _surface;
-    VkSwapchainKHR _swapchain;
-    VkFormat _swapchainImageFormat;
-	VkExtent2D _swapchainExtent;
-	VkExtent2D _drawExtent;
+    VkSurfaceKHR surface;
+    VkSwapchainKHR swapchain;
+    VkFormat swapchainImageFormat;
+	VkExtent2D swapchainExtent;
+	VkExtent2D drawExtent;
 
-    VkDescriptorPool _descriptorPool;
+    VkDescriptorPool descriptorPool;
 
     DescriptorAllocator globalDescriptorAllocator;
 
-    VkPipeline _gradientPipeline;
-    VkPipelineLayout _gradientPipelineLayout;
+    VkPipeline gradientPipeline;
+    VkPipelineLayout gradientPipelineLayout;
     
-    std::vector<VkImage> _swapchainImages;
-    std::vector<VkImageView> _swapchainImageViews;
+    std::vector<VkImage> swapchainImages;
+    std::vector<VkImageView> swapchainImageViews;
 
-	VkDescriptorSet _drawImageDescriptors;
-	VkDescriptorSetLayout _drawImageDescriptorLayout;
+	VkDescriptorSet drawImageDescriptors;
+	VkDescriptorSetLayout drawImageDescriptorLayout;
 
-    DeletionQueue _mainDeletionQueue;
+    DeletionQueue mainDeletionQueue;
 
-    VmaAllocator _allocator; // vma lib allocator
+    VmaAllocator allocator; // vma lib allocator
 
-	VkDescriptorSetLayout _gpuSceneDataDescriptorLayout;
+	VkDescriptorSetLayout gpuSceneDataDescriptorLayout;
 
     GLTFMetallic_Roughness metalRoughMaterial;
 
     // draw resources
-    AllocatedImage _drawImage;
-    AllocatedImage _depthImage;
+    AllocatedImage drawImage;
+    AllocatedImage depthImage;
 
     // immediate submit structures
-    VkFence _immFence;
-    VkCommandBuffer _immCommandBuffer;
-    VkCommandPool _immCommandPool;
+    VkFence immFence;
+    VkCommandBuffer immCommandBuffer;
+    VkCommandPool immCommandPool;
 
-	AllocatedImage _whiteImage;
-	AllocatedImage _blackImage;
-	AllocatedImage _greyImage;
-	AllocatedImage _errorCheckerboardImage;
+	AllocatedImage whiteImage;
+	AllocatedImage blackImage;
+	AllocatedImage greyImage;
+	AllocatedImage errorCheckerboardImage;
 
-	VkSampler _defaultSamplerLinear;
-	VkSampler _defaultSamplerNearest;
+	VkSampler defaultSamplerLinear;
+	VkSampler defaultSamplerNearest;
 	
     GPUMeshBuffers rectangle;
     DrawContext drawCommands;
