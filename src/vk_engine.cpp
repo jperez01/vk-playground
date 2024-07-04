@@ -1284,7 +1284,7 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine* engine)
 	pipelineBuilder.set_depth_format(engine->depthImage.imageFormat);
 
 	// use the triangle layout we created
-	pipelineBuilder._pipelineLayout = newLayout;
+	pipelineBuilder.pipelineLayout = newLayout;
 
 	// finally build the pipeline
     opaquePipeline.pipeline = pipelineBuilder.build_pipeline(engine->device);
