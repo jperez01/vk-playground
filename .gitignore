@@ -4,4 +4,4 @@
 cmake-build-relwithdebinfo
 cmake-build-debug
 .idea
-spirv/.
+spirv/*
