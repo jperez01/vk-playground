@@ -235,8 +235,10 @@ bool vkutil::load_shader_module(const char* filePath,
     VkDevice device,
     VkShaderModule* outShaderModule)
 {
+    const std::string initialShaderPath = "../spirv/";
+    std::string finalPath = initialShaderPath + filePath + ".spv";
     // open the file. With cursor at the end
-    std::ifstream file(filePath, std::ios::ate | std::ios::binary);
+    std::ifstream file(finalPath, std::ios::ate | std::ios::binary);
 
     if (!file.is_open()) {
         return false;
