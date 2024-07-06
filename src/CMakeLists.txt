@@ -7,6 +7,9 @@ add_executable (demo
 
   vk_loader.h
   vk_loader.cpp
+        utils/util.cpp
+        utils/util.h
+        utils/util.h
 )
 
 

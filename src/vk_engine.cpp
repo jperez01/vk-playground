@@ -20,6 +20,7 @@
 
 #define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.h"
+#include "utils/util.h"
 
 constexpr bool bUseValidationLayers = true;
 
@@ -471,11 +472,11 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
     });
 
     //allocate a new uniform buffer for the scene data
-    AllocatedBuffer gpuSceneDataBuffer =  create_buffer(sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    AllocatedBuffer gpuSceneDataBuffer =  vkutil::createBuffer(allocator, sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
     //add it to the deletion queue of this frame so it gets deleted once its been used
     get_current_frame()._deletionQueue.push_function([=,this](){
-        destroy_buffer(gpuSceneDataBuffer);
+        vkutil::destroyBuffer(allocator, gpuSceneDataBuffer);
     });
 
     //write the buffer
@@ -666,72 +667,14 @@ void VulkanEngine::update_scene()
 
 }
 
-AllocatedBuffer VulkanEngine::create_buffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage)
-{
-    // allocate buffer
-    VkBufferCreateInfo bufferInfo = {};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.pNext = nullptr;
-    bufferInfo.size = allocSize;
-
-    bufferInfo.usage = usage;
-
-    VmaAllocationCreateInfo vmaallocInfo = {};
-    vmaallocInfo.usage = memoryUsage;
-    vmaallocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
-    AllocatedBuffer newBuffer;
-
-    // allocate the buffer
-    VK_CHECK(vmaCreateBuffer(allocator, &bufferInfo, &vmaallocInfo, &newBuffer.buffer, &newBuffer.allocation,
-        &newBuffer.info));
-
-    return newBuffer;
-}
-
-AllocatedImage VulkanEngine::create_image(VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped)
-{
-    AllocatedImage newImage;
-    newImage.imageFormat = format;
-    newImage.imageExtent = size;
-
-    VkImageCreateInfo img_info = vkinit::image_create_info(format, usage, size);
-    if (mipmapped) {
-		img_info.mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(size.width, size.height)))) + 1;
-    }
-
-    // always allocate images on dedicated GPU memory
-    VmaAllocationCreateInfo allocinfo = {};
-    allocinfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-    allocinfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    // allocate and create the image
-    VK_CHECK(vmaCreateImage(allocator, &img_info, &allocinfo, &newImage.image, &newImage.allocation, nullptr));
-
-    // if the format is a depth format, we will need to have it use the correct
-    // aspect flag
-    VkImageAspectFlags aspectFlag = VK_IMAGE_ASPECT_COLOR_BIT;
-    if (format == VK_FORMAT_D32_SFLOAT) {
-        aspectFlag = VK_IMAGE_ASPECT_DEPTH_BIT;
-    }
-
-    // build a image-view for the image
-    VkImageViewCreateInfo view_info = vkinit::imageview_create_info(format, newImage.image, aspectFlag);
-    view_info.subresourceRange.levelCount = img_info.mipLevels;
-
-    VK_CHECK(vkCreateImageView(device, &view_info, nullptr, &newImage.imageView));
-
-    return newImage;
-}
-
 //> create_mip_2
-AllocatedImage VulkanEngine::create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped)
-{
-    size_t data_size = size.depth * size.width * size.height * 4;
-    AllocatedBuffer uploadbuffer = create_buffer(data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+AllocatedImage VulkanEngine::create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped) {
+	size_t data_size = size.depth * size.width * size.height * 4;
+	AllocatedBuffer uploadbuffer = vkutil::createBuffer(allocator, data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
-    memcpy(uploadbuffer.info.pMappedData, data, data_size);
+	memcpy(uploadbuffer.info.pMappedData, data, data_size);
 
-    AllocatedImage new_image = create_image(size, format, usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, mipmapped);
+	AllocatedImage new_image = vkutil::createImage(device, allocator, size, format, usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, mipmapped);
 
     immediate_submit([&](VkCommandBuffer cmd) {
         vkutil::transition_image(cmd, new_image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
@@ -758,7 +701,7 @@ AllocatedImage VulkanEngine::create_image(void* data, VkExtent3D size, VkFormat 
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
     });
-    destroy_buffer(uploadbuffer);
+    vkutil::destroyBuffer(allocator, uploadbuffer);
     return new_image;
 }
 //< create_mip_2
@@ -770,17 +713,17 @@ GPUMeshBuffers VulkanEngine::uploadMesh(std::span<uint32_t> indices, std::span<V
 
     GPUMeshBuffers newSurface;
 
-    newSurface.vertexBuffer = create_buffer(vertexBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+    newSurface.vertexBuffer = vkutil::createBuffer(allocator, vertexBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
         VMA_MEMORY_USAGE_GPU_ONLY);
 
 
     VkBufferDeviceAddressInfo deviceAdressInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,.buffer = newSurface.vertexBuffer.buffer};
     newSurface.vertexBufferAddress = vkGetBufferDeviceAddress(device, &deviceAdressInfo);
 
-    newSurface.indexBuffer = create_buffer(indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+    newSurface.indexBuffer = vkutil::createBuffer(allocator, indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VMA_MEMORY_USAGE_GPU_ONLY);
 
-    AllocatedBuffer staging = create_buffer(vertexBufferSize + indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    AllocatedBuffer staging = vkutil::createBuffer(allocator, vertexBufferSize + indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 
     void* data = staging.allocation->GetMappedData();
 
@@ -805,7 +748,7 @@ GPUMeshBuffers VulkanEngine::uploadMesh(std::span<uint32_t> indices, std::span<V
         vkCmdCopyBuffer(cmd, staging.buffer, newSurface.indexBuffer.buffer, 1, &indexCopy);
     });
 
-    destroy_buffer(staging);
+    vkutil::destroyBuffer(allocator, staging);
 
     return newSurface;
 }
@@ -844,17 +787,6 @@ void VulkanEngine::immediate_submit(std::function<void(VkCommandBuffer cmd)>&& f
     VK_CHECK(vkQueueSubmit2(graphicsQueue, 1, &submit, immFence));
 
     VK_CHECK(vkWaitForFences(device, 1, &immFence, true, 9999999999));
-}
-
-void VulkanEngine::destroy_image(const AllocatedImage& img)
-{
-    vkDestroyImageView(device, img.imageView, nullptr);
-    vmaDestroyImage(allocator, img.image, img.allocation);
-}
-
-void VulkanEngine::destroy_buffer(const AllocatedBuffer& buffer)
-{
-    vmaDestroyBuffer(allocator, buffer.buffer, buffer.allocation);
 }
 
 void VulkanEngine::init_vulkan()

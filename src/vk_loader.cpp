@@ -11,6 +11,8 @@
 #include <fastgltf/parser.hpp>
 #include <fastgltf/tools.hpp>
 #include <fastgltf/util.hpp>
+
+#include "utils/util.h"
 //> loadimg
 std::optional<AllocatedImage> load_image(VulkanEngine* engine, fastgltf::Asset& asset, fastgltf::Image& image)
 {
@@ -222,7 +224,7 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
 
 //> load_buffer
     // create buffer to hold the material data
-    file.materialDataBuffer = engine->create_buffer(sizeof(GLTFMetallic_Roughness::MaterialConstants) * gltf.materials.size(),
+    file.materialDataBuffer = vkutil::createBuffer(engine->allocator, sizeof(GLTFMetallic_Roughness::MaterialConstants) * gltf.materials.size(),
         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
     int data_index = 0;
     GLTFMetallic_Roughness::MaterialConstants* sceneMaterialConstants = (GLTFMetallic_Roughness::MaterialConstants*)file.materialDataBuffer.info.pMappedData;
@@ -448,9 +450,8 @@ void LoadedGLTF::clearAll()
     VkDevice dv = creator->device;
 
     for (auto& [k, v] : meshes) {
-
-        creator->destroy_buffer(v->meshBuffers.indexBuffer);
-        creator->destroy_buffer(v->meshBuffers.vertexBuffer);
+        vkutil::destroyBuffer(creator->allocator, v->meshBuffers.indexBuffer);
+        vkutil::destroyBuffer(creator->allocator, v->meshBuffers.vertexBuffer);
     }
 
     for (auto& [k, v] : images) {
@@ -459,7 +460,7 @@ void LoadedGLTF::clearAll()
             // dont destroy the default images
             continue;
         }
-        creator->destroy_image(v);
+        vkutil::destroyImage(creator->device, creator->allocator, v);
     }
 
     for (auto& sampler : samplers) {
@@ -471,5 +472,5 @@ void LoadedGLTF::clearAll()
 
     descriptorPool.destroy_pools(dv);
 
-    creator->destroy_buffer(materialBuffer);
+    vkutil::destroyBuffer(creator->allocator, materialBuffer);
 }
