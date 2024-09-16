@@ -52,8 +52,8 @@ struct GPUSceneData {
     glm::mat4 proj;
     glm::mat4 viewproj;
     glm::vec4 ambientColor;
-    glm::vec4 sunlightDirection; // w for sun power
-    glm::vec4 sunlightColor;
+    glm::vec4 sunlightDirection = {1.0f, -0.5f, -1.0f, 0.0f}; // w for sun power
+    glm::vec4 sunlightColor = {1.0f, 1.0f, 1.0f, 0.0f};
 };
 
 //> mat_types

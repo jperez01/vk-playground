@@ -384,8 +384,6 @@ void VulkanEngine::draw()
 	// _renderFence will now block until the graphic commands finish execution
 	VK_CHECK(vkQueueSubmit2(graphicsQueue, 1, &submit, get_current_frame()._renderFence));
 
-
-
 	//prepare present
 	// this will put the image we just rendered to into the visible window.
 	// we want to wait on the _renderSemaphore for that,
@@ -622,6 +620,9 @@ void VulkanEngine::run()
 			ImGui::InputFloat4("data2", (float*)&selected.data.data2);
 			ImGui::InputFloat4("data3", (float*)&selected.data.data3);
 			ImGui::InputFloat4("data4", (float*)&selected.data.data4);
+
+			ImGui::SliderFloat4("Sunlight Color", (float*)&sceneData.sunlightColor, 0.0f, 1.0f);
+			ImGui::SliderFloat4("Sunlight Direction", (float*)&sceneData.sunlightDirection, -1.0f, 1.0f);
 
 			ImGui::End();
 		}
@@ -941,7 +942,6 @@ void VulkanEngine::destroy_swapchain()
 
 	// destroy swapchain resources
 	for (int i = 0; i < swapchainImageViews.size(); i++) {
-
 		vkDestroyImageView(device, swapchainImageViews[i], nullptr);
 	}
 }
@@ -1203,7 +1203,7 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine* engine)
 
 	pipelineBuilder.set_polygon_mode(VK_POLYGON_MODE_FILL);
 
-	pipelineBuilder.set_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
+	pipelineBuilder.set_cull_mode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE);
 
 	pipelineBuilder.set_multisampling_none();
 
