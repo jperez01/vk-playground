@@ -135,6 +135,7 @@ struct Node : public IRenderable {
         }
     }
 };
+
 //< node_types
 //> intro
 #define VK_CHECK(x)                                                     \

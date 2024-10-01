@@ -184,6 +184,12 @@ public:
     AllocatedImage drawImage;
     AllocatedImage depthImage;
 
+	AllocatedImage postProcessingImage;
+	VkPipeline postProcessPipeline;
+	VkPipelineLayout postProcessPipelineLayout;
+	VkDescriptorSetLayout postProcessImageLayout;
+	VkDescriptorSet postProcessDescriptorSet;
+
     // immediate submit structures
     VkFence immFence;
     VkCommandBuffer immCommandBuffer;
@@ -266,6 +272,7 @@ private:
 
     void init_pipelines();
     void init_background_pipelines();
+	void init_post_process_pipeline();
 
     void init_descriptors();
 

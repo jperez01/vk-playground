@@ -19,6 +19,8 @@
 #include <glm/gtx/transform.hpp>
 
 #define VMA_IMPLEMENTATION
+#include <iostream>
+
 #include "vk_mem_alloc.h"
 #include "utils/util.h"
 
@@ -82,10 +84,10 @@ void VulkanEngine::init()
 void VulkanEngine::init_default_data() {
 	std::array<Vertex, 4> rect_vertices;
 
-	rect_vertices[0].position = { 0.5,-0.5, 0 };
-	rect_vertices[1].position = { 0.5,0.5, 0 };
-	rect_vertices[2].position = { -0.5,-0.5, 0 };
-	rect_vertices[3].position = { -0.5,0.5, 0 };
+	rect_vertices[0].position = { 1.0,-1.0, 0 };
+	rect_vertices[1].position = { 1.0,1.0, 0 };
+	rect_vertices[2].position = { -1.0,-1.0, 0 };
+	rect_vertices[3].position = { -1.0,1.0, 0 };
 
 	rect_vertices[0].color = { 0,0, 0,1 };
 	rect_vertices[1].color = { 0.5,0.5,0.5 ,1 };
@@ -101,15 +103,9 @@ void VulkanEngine::init_default_data() {
 	rect_vertices[3].uv_x = 0;
 	rect_vertices[3].uv_y = 1;
 
-	std::array<uint32_t, 6> rect_indices;
-
-	rect_indices[0] = 0;
-	rect_indices[1] = 1;
-	rect_indices[2] = 2;
-
-	rect_indices[3] = 2;
-	rect_indices[4] = 1;
-	rect_indices[5] = 3;
+	std::array<uint32_t, 6> rect_indices = {
+		0, 1, 2, 2, 1, 3
+	};
 
 	rectangle = uploadMesh(rect_indices, rect_vertices);
 
@@ -290,6 +286,41 @@ void VulkanEngine::draw_main(VkCommandBuffer cmd)
 
 	stats.mesh_draw_time = elapsed.count() / 1000.f;
 
+	vkCmdEndRendering(cmd);
+
+	// Post Process Stuff
+	VkRenderingAttachmentInfo postProcessColorAttachment = vkinit::attachment_info(postProcessingImage.imageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+	VkRenderingInfo postProcessRenderInfo = vkinit::rendering_info(windowExtent, &postProcessColorAttachment, nullptr);
+
+	vkCmdBeginRendering(cmd, &postProcessRenderInfo);
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, postProcessPipeline);
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, postProcessPipelineLayout, 0, 1, &postProcessDescriptorSet, 0, nullptr);
+
+	VkViewport viewport = {};
+	viewport.x = 0;
+	viewport.y = 0;
+	viewport.width = (float)windowExtent.width;
+	viewport.height = (float)windowExtent.height;
+	viewport.minDepth = 0.f;
+	viewport.maxDepth = 1.f;
+	vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+	VkRect2D scissor = {};
+	scissor.offset.x = 0;
+	scissor.offset.y = 0;
+	scissor.extent.width = windowExtent.width;
+	scissor.extent.height = windowExtent.height;
+	vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+	GPUDrawPushConstants push_constants{};
+	push_constants.worldMatrix = glm::mat4(1.f);
+	push_constants.vertexBuffer = rectangle.vertexBufferAddress;
+	vkCmdPushConstants(cmd, postProcessPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
+	vkCmdBindIndexBuffer(cmd, rectangle.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+	vkCmdDrawIndexed(cmd, 6, 1, 0, 0, 0);
+
+	vkutil::transition_image(cmd, postProcessingImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 	vkCmdEndRendering(cmd);
 }
 
@@ -529,7 +560,7 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
             vkCmdBindIndexBuffer(cmd, r.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
         }
         // calculate final mesh matrix
-        GPUDrawPushConstants push_constants;
+        GPUDrawPushConstants push_constants{};
         push_constants.worldMatrix = r.transform;
         push_constants.vertexBuffer = r.vertexBufferAddress;
 
@@ -1100,6 +1131,7 @@ void VulkanEngine::init_pipelines()
     init_background_pipelines();
 
     metalRoughMaterial.build_pipelines(this);
+	init_post_process_pipeline();
 }
 
 void VulkanEngine::init_descriptors()
@@ -1230,6 +1262,99 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine* engine)
 
 	vkDestroyShaderModule(engine->device, meshFragShader, nullptr);
 	vkDestroyShaderModule(engine->device, meshVertexShader, nullptr);
+}
+
+void VulkanEngine::init_post_process_pipeline() {
+	DescriptorLayoutBuilder layoutBuilder;
+	layoutBuilder.add_binding(0,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+	layoutBuilder.add_binding(1,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+
+	postProcessImageLayout = layoutBuilder.build(device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+
+	postProcessDescriptorSet = globalDescriptorAllocator.allocate(device, postProcessImageLayout);
+	{
+		DescriptorWriter writer;
+		writer.clear();
+		writer.write_image(1, drawImage.imageView, defaultSamplerLinear, VK_IMAGE_LAYOUT_GENERAL, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+		writer.update_set(device, postProcessDescriptorSet);
+	}
+	VkPushConstantRange matrixRange{};
+	matrixRange.offset = 0;
+	matrixRange.size = sizeof(GPUDrawPushConstants);
+	matrixRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+	VkDescriptorSetLayout layouts[] = { postProcessImageLayout };
+
+	VkPipelineLayoutCreateInfo quadMeshLayoutInfo = vkinit::pipeline_layout_create_info();
+	quadMeshLayoutInfo.setLayoutCount = 1;
+	quadMeshLayoutInfo.pSetLayouts = layouts;
+	quadMeshLayoutInfo.pPushConstantRanges = &matrixRange;
+	quadMeshLayoutInfo.pushConstantRangeCount = 1;
+
+	VkPipelineLayout newLayout;
+	VK_CHECK(vkCreatePipelineLayout(device, &quadMeshLayoutInfo, nullptr, &newLayout));
+
+	//depth image size will match the window
+	VkExtent3D postProcessImageExtent = {
+		windowExtent.width,
+		windowExtent.height,
+		1
+	};
+
+	postProcessingImage.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+	postProcessingImage.imageExtent = postProcessImageExtent;
+
+	VkImageUsageFlags postProcessImageUsages{};
+	postProcessImageUsages |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	postProcessImageUsages |= VK_IMAGE_USAGE_STORAGE_BIT;
+	postProcessImageUsages |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+	VkImageCreateInfo postProcessImageCreateInfo = vkinit::image_create_info(postProcessingImage.imageFormat, postProcessImageUsages, postProcessImageExtent);
+
+	//for the draw image, we want to allocate it from gpu local memory
+	VmaAllocationCreateInfo rimg_allocinfo = {};
+	rimg_allocinfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+	rimg_allocinfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+	//allocate and create the image
+	vmaCreateImage(allocator, &postProcessImageCreateInfo, &rimg_allocinfo, &postProcessingImage.image, &postProcessingImage.allocation, nullptr);
+
+	//build a image-view for the draw image to use for rendering
+	VkImageViewCreateInfo rview_info = vkinit::imageview_create_info(postProcessingImage.imageFormat, postProcessingImage.image, VK_IMAGE_ASPECT_COLOR_BIT);
+	VK_CHECK(vkCreateImageView(device, &rview_info, nullptr, &postProcessingImage.imageView));
+
+	mainDeletionQueue.push_function([&]() {
+		vkDestroyImageView(device, postProcessingImage.imageView, nullptr);
+		vmaDestroyImage(allocator, postProcessingImage.image, postProcessingImage.allocation);
+	});
+
+	VkShaderModule postProcessVertexShader;
+	if (!vkutil::load_shader_module("screen_texture.vert", device, &postProcessVertexShader)) {
+		fmt::print("Error when loading the postprocess vertex shader module");
+	}
+	VkShaderModule postProcessFragmentShader;
+	if (!vkutil::load_shader_module("screen_texture.frag", device, &postProcessFragmentShader)) {
+		fmt::print("Error when loading the postprocess fragment shader module");
+	}
+
+	PipelineBuilder pipelineBuilder;
+	pipelineBuilder.set_shaders(postProcessVertexShader, postProcessFragmentShader);
+
+	pipelineBuilder.set_input_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+	pipelineBuilder.set_polygon_mode(VK_POLYGON_MODE_FILL);
+	pipelineBuilder.set_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+	pipelineBuilder.disable_blending();
+	pipelineBuilder.set_multisampling_none();
+	pipelineBuilder.enable_depthtest(true, VK_COMPARE_OP_GREATER_OR_EQUAL);
+
+	pipelineBuilder.set_color_attachment_format(postProcessingImage.imageFormat);
+	pipelineBuilder.pipelineLayout = newLayout;
+
+	postProcessPipeline = pipelineBuilder.build_pipeline(device);
+	postProcessPipelineLayout = newLayout;
+
+	vkDestroyShaderModule(device, postProcessVertexShader, nullptr);
+	vkDestroyShaderModule(device, postProcessFragmentShader, nullptr);
 }
 
 void GLTFMetallic_Roughness::clear_resources(VkDevice device)
