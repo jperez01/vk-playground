@@ -18,10 +18,14 @@
 #include <vk_descriptors.h>
 #include <vk_loader.h>
 #include <vk_pipelines.h>
+
+#include "model/model.h"
+
 struct MeshAsset;
 namespace fastgltf {
 struct Mesh;
 }
+class Model;
 
 struct DeletionQueue {
     std::deque<std::function<void()>> deletors;
@@ -134,7 +138,6 @@ struct MeshNode : public Node {
 
 class VulkanEngine {
 public:
-    bool isInitialized { false };
     int frameNumber { 0 };
 
     VkExtent2D windowExtent { 1700, 900 };
@@ -212,6 +215,8 @@ public:
 
     EngineStats stats;
 
+	std::vector<Model> importedModels;
+
 	std::vector<ComputeEffect> backgroundEffects;
 	int currentBackgroundEffect{ 0 };
 
@@ -221,8 +226,13 @@ public:
     // initializes everything in the engine
     void init();
 
+	// run rendering code
+	void run();
+
     // shuts down the engine
     void cleanup();
+
+	void handleSDLEvent(SDL_Event& e);
 
     // draw loop
     void draw();
@@ -233,14 +243,13 @@ public:
 
     void draw_geometry(VkCommandBuffer cmd);
 
-    // run main loop
-    void run();
-
     void update_scene();
 
     // upload a mesh into a pair of gpu buffers. If descriptor allocator is not
     // null, it will also create a descriptor that points to the vertex buffer
 	GPUMeshBuffers uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
+	void handleImGui();
+	void resize_swapchain();
 
     FrameData& get_current_frame();
     FrameData& get_last_frame();
@@ -263,9 +272,6 @@ private:
 
     void create_swapchain(uint32_t width, uint32_t height);
 
-
-	void resize_swapchain();
-
     void destroy_swapchain();
 
     void init_commands();
@@ -283,4 +289,6 @@ private:
     void init_imgui();
 
     void init_default_data();
+
+	void sendModelDataToGpu();
 };

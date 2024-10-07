@@ -69,10 +69,9 @@ void VulkanEngine::init()
 
     init_renderables();
 
-    init_imgui();
+	sendModelDataToGpu();
 
-    // everything went fine
-    isInitialized = true;
+    init_imgui();
 
     mainCamera.velocity = glm::vec3(0.f);
     mainCamera.position = glm::vec3(30.f, -00.f, -085.f);
@@ -148,31 +147,33 @@ void VulkanEngine::init_default_data() {
 
 void VulkanEngine::cleanup()
 {
-    if (isInitialized) {
+    // make sure the gpu has stopped doing its things
+    vkDeviceWaitIdle(device);
 
-        // make sure the gpu has stopped doing its things
-        vkDeviceWaitIdle(device);
+    loadedScenes.clear();
 
-        loadedScenes.clear();
-
-        for (auto& frame : frames) {
-            frame._deletionQueue.flush();
-        }
-
-        mainDeletionQueue.flush();
-
-        destroy_swapchain();
-
-        vkDestroySurfaceKHR(instance, surface, nullptr);
-
-        vmaDestroyAllocator(allocator);
-
-        vkDestroyDevice(device, nullptr);
-        vkb::destroy_debug_utils_messenger(instance, debug_messenger);
-        vkDestroyInstance(instance, nullptr);
-
-        SDL_DestroyWindow(window);
+    for (auto& frame : frames) {
+        frame._deletionQueue.flush();
     }
+
+    mainDeletionQueue.flush();
+
+    destroy_swapchain();
+
+    vkDestroySurfaceKHR(instance, surface, nullptr);
+
+    vmaDestroyAllocator(allocator);
+
+    vkDestroyDevice(device, nullptr);
+    vkb::destroy_debug_utils_messenger(instance, debug_messenger);
+    vkDestroyInstance(instance, nullptr);
+
+    SDL_DestroyWindow(window);
+}
+
+void VulkanEngine::handleSDLEvent(SDL_Event &e) {
+	mainCamera.processSDLEvent(e);
+
 }
 
 void VulkanEngine::init_background_pipelines()
@@ -578,6 +579,27 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
         draw(drawCommands.OpaqueSurfaces[r]);
     }
 
+	auto someData = drawCommands.OpaqueSurfaces[0];
+
+	for (Model& model: importedModels) {
+		for (unsigned int i = 0; i < model.meshes.size(); i++) {
+			GPUMeshBuffers& meshBuffer = model.gpuMeshBuffers[i];
+			Mesh& meshData = model.meshes[i];
+			MaterialInfo& currentMaterialInfo = model.materialInfo[meshData.materialIndex];
+
+			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, someData.material->pipeline->layout, 1, 1,
+				&currentMaterialInfo.materialSet, 0, nullptr);
+
+			vkCmdBindIndexBuffer(cmd, meshBuffer.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+			GPUDrawPushConstants push_constants{};
+			push_constants.worldMatrix = glm::identity<glm::mat4>();
+			push_constants.vertexBuffer = meshBuffer.vertexBufferAddress;
+			vkCmdPushConstants(cmd, someData.material->pipeline->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
+
+			vkCmdDrawIndexed(cmd, meshData.indices.size(), 1, 0, 0, 0);
+		}
+	}
+
     for (auto& r : drawCommands.TransparentSurfaces) {
         draw(r);
     }
@@ -589,90 +611,20 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
 
 void VulkanEngine::run()
 {
-    SDL_Event e;
-    bool bQuit = false;
+	auto start = std::chrono::system_clock::now();
+	if (resize_requested) {
+		resize_swapchain();
+	}
+	handleImGui();
 
-    // main loop
-    while (!bQuit) {
-        auto start = std::chrono::system_clock::now();
+	update_scene();
 
-        // Handle events on queue
-        while (SDL_PollEvent(&e) != 0) {
-            // close the window when user alt-f4s or clicks the X button
-            if (e.type == SDL_QUIT)
-                bQuit = true;
+	draw();
 
-            if (e.type == SDL_WINDOWEVENT) {
+	auto end = std::chrono::system_clock::now();
+	auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
-				if (e.window.event == SDL_WINDOWEVENT_RESIZED) {
-                    resize_requested = true;
-				}
-				if (e.window.event == SDL_WINDOWEVENT_MINIMIZED) {
-					freeze_rendering = true;
-				}
-				if (e.window.event == SDL_WINDOWEVENT_RESTORED) {
-					freeze_rendering = false;
-				}
-            }
-
-            mainCamera.processSDLEvent(e);
-            ImGui_ImplSDL2_ProcessEvent(&e);
-        }
-
-        if (freeze_rendering) continue;
-
-		if (resize_requested) {
-			resize_swapchain();
-		}
-
-        // imgui new frame
-        ImGui_ImplVulkan_NewFrame();
-        ImGui_ImplSDL2_NewFrame();
-
-        ImGui::NewFrame();
-
-        ImGui::Begin("Stats");
-
-		ImGui::Text("frametime %f ms", stats.frametime);
-		ImGui::Text("drawtime %f ms", stats.mesh_draw_time);
-		ImGui::Text("triangles %i", stats.triangle_count);
-		ImGui::Text("draws %i", stats.drawcall_count);
-        ImGui::End();
-
-		if (ImGui::Begin("background")) {
-
-			ComputeEffect& selected = backgroundEffects[currentBackgroundEffect];
-
-			ImGui::Text("Selected effect: ", selected.name);
-
-			ImGui::SliderInt("Effect Index", &currentBackgroundEffect, 0, backgroundEffects.size() - 1);
-
-			ImGui::InputFloat4("data1", (float*)&selected.data.data1);
-			ImGui::InputFloat4("data2", (float*)&selected.data.data2);
-			ImGui::InputFloat4("data3", (float*)&selected.data.data3);
-			ImGui::InputFloat4("data4", (float*)&selected.data.data4);
-
-			ImGui::SliderFloat4("Sunlight Color", (float*)&sceneData.sunlightColor, 0.0f, 1.0f);
-			ImGui::SliderFloat4("Sunlight Direction", (float*)&sceneData.sunlightDirection, -1.0f, 1.0f);
-
-			ImGui::End();
-		}
-
-		ImGui::Render();
-
-        // imgui commands
-        // ImGui::ShowDemoWindow();
-
-        update_scene();
-
-
-        draw();
-
-        auto end = std::chrono::system_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-
-        stats.frametime = elapsed.count() / 1000.f;
-    }
+	stats.frametime = elapsed.count() / 1000.f;
 }
 
 void VulkanEngine::update_scene()
@@ -989,7 +941,6 @@ void VulkanEngine::resize_swapchain()
 	windowExtent.height = h;
 
 	create_swapchain(windowExtent.width, windowExtent.height);
-
 	resize_requested = false;
 }
 
@@ -1058,6 +1009,9 @@ void VulkanEngine::init_renderables()
     assert(structureFile.has_value());
 
     loadedScenes["structure"] = *structureFile;
+
+	Model someModel("sponzaBasic/glTF/Sponza.gltf");
+	importedModels.push_back(someModel);
 }
 
 void VulkanEngine::init_imgui()
@@ -1143,7 +1097,7 @@ void VulkanEngine::init_descriptors()
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3 },
     };
 
-    globalDescriptorAllocator.init_pool(device, 10, sizes);
+    globalDescriptorAllocator.init_pool(device, 100, sizes);
     mainDeletionQueue.push_function(
         [&]() { vkDestroyDescriptorPool(device, globalDescriptorAllocator.pool, nullptr); });
 
@@ -1355,6 +1309,89 @@ void VulkanEngine::init_post_process_pipeline() {
 
 	vkDestroyShaderModule(device, postProcessVertexShader, nullptr);
 	vkDestroyShaderModule(device, postProcessFragmentShader, nullptr);
+}
+
+void VulkanEngine::sendModelDataToGpu() {
+	for (Model& model: importedModels) {
+		for (Mesh& mesh: model.meshes) {
+			auto meshBuffer = uploadMesh(mesh.indices, mesh.vertices);
+			model.gpuMeshBuffers.push_back(meshBuffer);
+		}
+
+		for (auto& [path, textureInfo] : model.alreadyLoadedImages) {
+			VkExtent3D imageExtent = {(uint32_t) textureInfo.height, (uint32_t) textureInfo.width, 1};
+			bool shouldBeMipmapped = imageExtent.width > 2 && imageExtent.height > 2;
+			auto gpuTexture = create_image(textureInfo.data, imageExtent, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, shouldBeMipmapped);
+
+			model.gpuTextures[path] = gpuTexture;
+		}
+
+		for (MaterialInfo& materialInfo : model.materialInfo) {
+			DescriptorLayoutBuilder descriptorLayoutBuilder;
+			descriptorLayoutBuilder.add_binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+			descriptorLayoutBuilder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+			descriptorLayoutBuilder.add_binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+			auto materialSetLayout = descriptorLayoutBuilder.build(device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+			materialInfo.materialSet = globalDescriptorAllocator.allocate(device, materialSetLayout);
+
+			DescriptorWriter descriptorWriter;
+			for (unsigned int j = 0; j < materialInfo.texturePaths.size(); j++) {
+				auto currentPath = materialInfo.texturePaths[j];
+				auto currentType = materialInfo.textureFileTypes[j];
+
+				int bindingIndex = 0;
+				if (currentType == "texture_diffuse") {
+					bindingIndex = 1;
+				} else if (currentType == "texture_normal") {
+					bindingIndex = 2;
+				}
+
+				AllocatedImage& textureImage = model.gpuTextures[currentPath];
+
+				if (bindingIndex != 0) {
+					descriptorWriter.write_image(bindingIndex, textureImage.imageView, defaultSamplerLinear, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+				}
+			}
+			descriptorWriter.update_set(device, materialInfo.materialSet);
+		}
+	}
+}
+
+void VulkanEngine::handleImGui() {
+	// imgui new frame
+	ImGui_ImplVulkan_NewFrame();
+	ImGui_ImplSDL2_NewFrame();
+
+	ImGui::NewFrame();
+
+	ImGui::Begin("Stats");
+
+	ImGui::Text("frametime %f ms", stats.frametime);
+	ImGui::Text("drawtime %f ms", stats.mesh_draw_time);
+	ImGui::Text("triangles %i", stats.triangle_count);
+	ImGui::Text("draws %i", stats.drawcall_count);
+	ImGui::End();
+
+	if (ImGui::Begin("background")) {
+
+		ComputeEffect& selected = backgroundEffects[currentBackgroundEffect];
+
+		ImGui::Text("Selected effect: ", selected.name);
+
+		ImGui::SliderInt("Effect Index", &currentBackgroundEffect, 0, backgroundEffects.size() - 1);
+
+		ImGui::InputFloat4("data1", (float*)&selected.data.data1);
+		ImGui::InputFloat4("data2", (float*)&selected.data.data2);
+		ImGui::InputFloat4("data3", (float*)&selected.data.data3);
+		ImGui::InputFloat4("data4", (float*)&selected.data.data4);
+
+		ImGui::SliderFloat4("Sunlight Color", (float*)&sceneData.sunlightColor, 0.0f, 1.0f);
+		ImGui::SliderFloat4("Sunlight Direction", (float*)&sceneData.sunlightDirection, -1.0f, 1.0f);
+
+		ImGui::End();
+	}
+
+	ImGui::Render();
 }
 
 void GLTFMetallic_Roughness::clear_resources(VkDevice device)
