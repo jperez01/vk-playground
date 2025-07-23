@@ -10,6 +10,13 @@
 
 Application::Application() {
 	engine.init();
+
+	mainCamera.velocity = glm::vec3(0.f);
+	mainCamera.position = glm::vec3(30.f, -00.f, -085.f);
+
+	mainCamera.pitch = 0;
+	mainCamera.yaw = 0;
+
 	isInitialized = true;
 }
 
@@ -38,12 +45,14 @@ void Application::run() {
 				}
             }
 
-            engine.handleSDLEvent(e);
+        	mainCamera.processSDLEvent(e);
         	ImGui_ImplSDL2_ProcessEvent(&e);
         }
 
         if (freeze_rendering) continue;
 
+    	mainCamera.update();
+    	engine.update_scene(mainCamera.getViewMatrix());
     	engine.run();
     }
 }

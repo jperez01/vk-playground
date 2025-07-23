@@ -14,6 +14,8 @@ add_executable (demo
   model/model.h
         app/application.cpp
         app/application.h
+        app/ui.cpp
+        app/ui.h
 )
 
 find_package(assimp CONFIG REQUIRED)

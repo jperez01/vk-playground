@@ -232,8 +232,6 @@ public:
     // shuts down the engine
     void cleanup();
 
-	void handleSDLEvent(SDL_Event& e);
-
     // draw loop
     void draw();
 	void draw_main(VkCommandBuffer cmd);
@@ -243,7 +241,7 @@ public:
 
     void draw_geometry(VkCommandBuffer cmd);
 
-    void update_scene();
+    void update_scene(const glm::mat4& viewMatrix);
 
     // upload a mesh into a pair of gpu buffers. If descriptor allocator is not
     // null, it will also create a descriptor that points to the vertex buffer

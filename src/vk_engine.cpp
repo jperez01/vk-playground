@@ -22,6 +22,7 @@
 #include <iostream>
 
 #include "vk_mem_alloc.h"
+#include "app/ui.h"
 #include "utils/util.h"
 
 constexpr bool bUseValidationLayers = true;
@@ -72,12 +73,6 @@ void VulkanEngine::init()
 	sendModelDataToGpu();
 
     init_imgui();
-
-    mainCamera.velocity = glm::vec3(0.f);
-    mainCamera.position = glm::vec3(30.f, -00.f, -085.f);
-
-    mainCamera.pitch = 0;
-    mainCamera.yaw = 0;
 }
 
 void VulkanEngine::init_default_data() {
@@ -169,11 +164,6 @@ void VulkanEngine::cleanup()
     vkDestroyInstance(instance, nullptr);
 
     SDL_DestroyWindow(window);
-}
-
-void VulkanEngine::handleSDLEvent(SDL_Event &e) {
-	mainCamera.processSDLEvent(e);
-
 }
 
 void VulkanEngine::init_background_pipelines()
@@ -617,8 +607,6 @@ void VulkanEngine::run()
 	}
 	handleImGui();
 
-	update_scene();
-
 	draw();
 
 	auto end = std::chrono::system_clock::now();
@@ -627,12 +615,8 @@ void VulkanEngine::run()
 	stats.frametime = elapsed.count() / 1000.f;
 }
 
-void VulkanEngine::update_scene()
+void VulkanEngine::update_scene(const glm::mat4& viewMatrix)
 {
-	mainCamera.update();
-
-	glm::mat4 view = mainCamera.getViewMatrix();
-
 	// camera projection
 	glm::mat4 projection = glm::perspective(glm::radians(70.f), (float)drawExtent.width / (float)drawExtent.height, 10000.f, 0.1f);
 
@@ -640,10 +624,9 @@ void VulkanEngine::update_scene()
 	// to opengl and gltf axis
 	projection[1][1] *= -1;
 
-	sceneData.view = view;
+	sceneData.view = viewMatrix;
 	sceneData.proj = projection;
-	sceneData.viewproj = projection * view;
-
+	sceneData.viewproj = projection * viewMatrix;
 
    // for (int i = 0; i < 16; i++)         {
         loadedScenes["structure"]->Draw(glm::mat4{ 1.f }, drawCommands);
@@ -1045,6 +1028,9 @@ void VulkanEngine::init_imgui()
 
 	// this initializes the core structures of imgui
 	ImGui::CreateContext();
+	ImGuiIO& io = ImGui::GetIO();
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
 	// this initializes imgui for SDL
 	ImGui_ImplSDL2_InitForVulkan(window);
@@ -1065,7 +1051,6 @@ void VulkanEngine::init_imgui()
 	init_info.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
 	init_info.PipelineRenderingCreateInfo.pColorAttachmentFormats = &swapchainImageFormat;
 
-
 	init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
 
 	ImGui_ImplVulkan_Init(&init_info);
@@ -1075,6 +1060,8 @@ void VulkanEngine::init_imgui()
 	// add the destroy the imgui created structures
 	mainDeletionQueue.push_function([=]() {
 		ImGui_ImplVulkan_Shutdown();
+		ImGui_ImplSDL2_Shutdown();
+		ImGui::DestroyContext();
 		vkDestroyDescriptorPool(device, imguiPool, nullptr);
 	});
 }
@@ -1363,6 +1350,8 @@ void VulkanEngine::handleImGui() {
 	ImGui_ImplSDL2_NewFrame();
 
 	ImGui::NewFrame();
+
+	Editor::handleUi();
 
 	ImGui::Begin("Stats");
 

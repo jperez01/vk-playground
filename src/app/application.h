@@ -12,6 +12,7 @@ public:
     Application();
 
     VulkanEngine engine;
+    Camera mainCamera;
     bool isInitialized { false };
     bool resize_requested{false};
     bool freeze_rendering{false};
