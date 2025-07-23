@@ -8,6 +8,7 @@
 namespace Editor
 {
     void handleUi();
+    void setupTheme();
 }
 
 

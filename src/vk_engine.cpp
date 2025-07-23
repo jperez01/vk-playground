@@ -628,10 +628,7 @@ void VulkanEngine::update_scene(const glm::mat4& viewMatrix)
 	sceneData.proj = projection;
 	sceneData.viewproj = projection * viewMatrix;
 
-   // for (int i = 0; i < 16; i++)         {
-        loadedScenes["structure"]->Draw(glm::mat4{ 1.f }, drawCommands);
-    //}
-
+    loadedScenes["structure"]->Draw(glm::mat4{ 1.f }, drawCommands);
 }
 
 //> create_mip_2
@@ -1031,6 +1028,7 @@ void VulkanEngine::init_imgui()
 	ImGuiIO& io = ImGui::GetIO();
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
 	// this initializes imgui for SDL
 	ImGui_ImplSDL2_InitForVulkan(window);
@@ -1055,7 +1053,6 @@ void VulkanEngine::init_imgui()
 
 	ImGui_ImplVulkan_Init(&init_info);
 
-	ImGui_ImplVulkan_CreateFontsTexture();
 
 	// add the destroy the imgui created structures
 	mainDeletionQueue.push_function([=]() {
