@@ -6,6 +6,7 @@
 
 #include <imgui_impl_sdl2.h>
 #include <imgui_impl_vulkan.h>
+#include <nfd.h>
 #include <SDL.h>
 
 Application::Application() {
@@ -18,6 +19,7 @@ Application::Application() {
 	mainCamera.yaw = 0;
 
 	isInitialized = true;
+	NFD_Init();
 }
 
 void Application::run() {
@@ -61,4 +63,5 @@ void Application::cleanup() {
 	if (isInitialized) {
 		engine.cleanup();
 	}
+	NFD_Quit();
 }

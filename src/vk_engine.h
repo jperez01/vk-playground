@@ -242,6 +242,7 @@ public:
     void draw_geometry(VkCommandBuffer cmd);
 
     void update_scene(const glm::mat4& viewMatrix);
+	void sendModelDataToGpu(Model& model);
 
     // upload a mesh into a pair of gpu buffers. If descriptor allocator is not
     // null, it will also create a descriptor that points to the vertex buffer
@@ -287,6 +288,4 @@ private:
     void init_imgui();
 
     void init_default_data();
-
-	void sendModelDataToGpu();
 };

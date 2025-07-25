@@ -11,8 +11,8 @@
 #include <assimp/postprocess.h>
 
 Model::Model(const std::string& filePath) {
-    auto finalPath = "../assets/" + filePath;
-    size_t beginningOfPath = finalPath.find_last_of('/');
+    auto finalPath = filePath;
+    size_t beginningOfPath = finalPath.find_last_of('\\');
     std::string pathWithoutModelName = finalPath.substr(0, beginningOfPath+1);
     overallPath = pathWithoutModelName;
 

@@ -70,8 +70,6 @@ void VulkanEngine::init()
 
     init_renderables();
 
-	sendModelDataToGpu();
-
     init_imgui();
 }
 
@@ -983,15 +981,17 @@ void VulkanEngine::init_sync_structures()
 
 void VulkanEngine::init_renderables()
 {
+	auto structureStart = chrono::system_clock::now();
     std::string structurePath = { "..\\assets\\structure.glb" };
     auto structureFile = loadGltf(this,structurePath);
 
     assert(structureFile.has_value());
 
     loadedScenes["structure"] = *structureFile;
+	auto structureEnd = chrono::system_clock::now();
+	auto structureElapsed = chrono::duration_cast<chrono::milliseconds>(structureEnd - structureStart).count();
+	fmt::println("Time elapsed loading structure: {} ms", structureElapsed);
 
-	Model someModel("sponzaBasic/glTF/Sponza.gltf");
-	importedModels.push_back(someModel);
 }
 
 void VulkanEngine::init_imgui()
@@ -1295,50 +1295,50 @@ void VulkanEngine::init_post_process_pipeline() {
 	vkDestroyShaderModule(device, postProcessFragmentShader, nullptr);
 }
 
-void VulkanEngine::sendModelDataToGpu() {
-	for (Model& model: importedModels) {
-		for (Mesh& mesh: model.meshes) {
-			auto meshBuffer = uploadMesh(mesh.indices, mesh.vertices);
-			model.gpuMeshBuffers.push_back(meshBuffer);
-		}
-
-		for (auto& [path, textureInfo] : model.alreadyLoadedImages) {
-			VkExtent3D imageExtent = {(uint32_t) textureInfo.height, (uint32_t) textureInfo.width, 1};
-			bool shouldBeMipmapped = imageExtent.width > 2 && imageExtent.height > 2;
-			auto gpuTexture = create_image(textureInfo.data, imageExtent, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, shouldBeMipmapped);
-
-			model.gpuTextures[path] = gpuTexture;
-		}
-
-		for (MaterialInfo& materialInfo : model.materialInfo) {
-			DescriptorLayoutBuilder descriptorLayoutBuilder;
-			descriptorLayoutBuilder.add_binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-			descriptorLayoutBuilder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-			descriptorLayoutBuilder.add_binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-			auto materialSetLayout = descriptorLayoutBuilder.build(device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
-			materialInfo.materialSet = globalDescriptorAllocator.allocate(device, materialSetLayout);
-
-			DescriptorWriter descriptorWriter;
-			for (unsigned int j = 0; j < materialInfo.texturePaths.size(); j++) {
-				auto currentPath = materialInfo.texturePaths[j];
-				auto currentType = materialInfo.textureFileTypes[j];
-
-				int bindingIndex = 0;
-				if (currentType == "texture_diffuse") {
-					bindingIndex = 1;
-				} else if (currentType == "texture_normal") {
-					bindingIndex = 2;
-				}
-
-				AllocatedImage& textureImage = model.gpuTextures[currentPath];
-
-				if (bindingIndex != 0) {
-					descriptorWriter.write_image(bindingIndex, textureImage.imageView, defaultSamplerLinear, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-				}
-			}
-			descriptorWriter.update_set(device, materialInfo.materialSet);
-		}
+void VulkanEngine::sendModelDataToGpu(Model& model) {
+	for (Mesh& mesh: model.meshes) {
+		auto meshBuffer = uploadMesh(mesh.indices, mesh.vertices);
+		model.gpuMeshBuffers.push_back(meshBuffer);
 	}
+
+	for (auto& [path, textureInfo] : model.alreadyLoadedImages) {
+		VkExtent3D imageExtent = {(uint32_t) textureInfo.height, (uint32_t) textureInfo.width, 1};
+		bool shouldBeMipmapped = imageExtent.width > 2 && imageExtent.height > 2;
+		auto gpuTexture = create_image(textureInfo.data, imageExtent, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, shouldBeMipmapped);
+
+		model.gpuTextures[path] = gpuTexture;
+	}
+
+	for (MaterialInfo& materialInfo : model.materialInfo) {
+		DescriptorLayoutBuilder descriptorLayoutBuilder;
+		descriptorLayoutBuilder.add_binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+		descriptorLayoutBuilder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+		descriptorLayoutBuilder.add_binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+		auto materialSetLayout = descriptorLayoutBuilder.build(device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+		materialInfo.materialSet = globalDescriptorAllocator.allocate(device, materialSetLayout);
+
+		DescriptorWriter descriptorWriter;
+		for (unsigned int j = 0; j < materialInfo.texturePaths.size(); j++) {
+			auto currentPath = materialInfo.texturePaths[j];
+			auto currentType = materialInfo.textureFileTypes[j];
+
+			int bindingIndex = 0;
+			if (currentType == "texture_diffuse") {
+				bindingIndex = 1;
+			} else if (currentType == "texture_normal") {
+				bindingIndex = 2;
+			}
+
+			AllocatedImage& textureImage = model.gpuTextures[currentPath];
+
+			if (bindingIndex != 0) {
+				descriptorWriter.write_image(bindingIndex, textureImage.imageView, defaultSamplerLinear, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+			}
+		}
+		descriptorWriter.update_set(device, materialInfo.materialSet);
+	}
+
+	importedModels.push_back(model);
 }
 
 void VulkanEngine::handleImGui() {
@@ -1348,7 +1348,7 @@ void VulkanEngine::handleImGui() {
 
 	ImGui::NewFrame();
 
-	Editor::handleUi();
+	Editor::handleUi(this);
 
 	ImGui::Begin("Stats");
 

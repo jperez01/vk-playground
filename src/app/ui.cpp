@@ -5,8 +5,30 @@
 #include "ui.h"
 
 #include "imgui.h"
+#include "nfd.h"
+#include "fmt/std.h"
 
-void Editor::handleUi()
+std::optional<std::string> openFileDialog()
+{
+    nfdopendialogu8args_t args = {};
+    nfdu8char_t *outPath;
+    nfdresult_t result = NFD_OpenDialogU8_With(&outPath, &args);
+
+    if (result == NFD_OKAY) {
+        std::string path(outPath);
+        NFD_FreePath(outPath);
+        return path;
+    }
+    if (result == NFD_CANCEL) {
+        fmt::println("User cancelled the file search.");
+    } else {
+        fmt::println("Failed to open dialogue with error {}", NFD_GetError());
+    }
+
+    return std::nullopt;
+}
+
+void Editor::handleUi(VulkanEngine* engine)
 {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
@@ -14,7 +36,12 @@ void Editor::handleUi()
 
             }
             if (ImGui::MenuItem("Load", "Ctrl+L")) {
-
+                auto foundPath = openFileDialog();
+                if (foundPath.has_value())
+                {
+                    Model model(foundPath.value());
+                    engine->sendModelDataToGpu(model);
+                }
             }
             if (ImGui::MenuItem("Save", "Ctrl+S")) {
 
