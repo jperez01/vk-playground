@@ -759,10 +759,20 @@ void VulkanEngine::init_vulkan()
     auto inst_ret = builder.set_app_name("Example Vulkan Application")
                         .request_validation_layers(bUseValidationLayers)
                         .use_default_debug_messenger()
-                        .require_api_version(1, 3, 0)
-                        .build();
+                        .require_api_version(1, 3, 0);
+    
+    // Enable enhanced validation features when validation layers are active
+    // Best practices validation warns about non-optimal Vulkan usage patterns
+    // Synchronization validation catches synchronization errors and over-broad barriers
+    if (bUseValidationLayers) {
+        inst_ret.add_validation_feature_enable(VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT)
+                .add_validation_feature_enable(VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT);
+        // VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT is optional but expensive
+    }
+    
+    auto instance_result = inst_ret.build();
 
-    vkb::Instance vkb_inst = inst_ret.value();
+    vkb::Instance vkb_inst = instance_result.value();
 
     // grab the instance
     instance = vkb_inst.instance;
