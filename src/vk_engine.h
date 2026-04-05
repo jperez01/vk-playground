@@ -171,6 +171,8 @@ public:
     
     std::vector<VkImage> swapchainImages;
     std::vector<VkImageView> swapchainImageViews;
+    std::vector<VkSemaphore> swapchainRenderSemaphores;
+    std::vector<bool> swapchainImageInitialized;
 
 	VkDescriptorSet drawImageDescriptors;
 	VkDescriptorSetLayout drawImageDescriptorLayout;
