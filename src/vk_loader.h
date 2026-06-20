@@ -1,4 +1,4 @@
-﻿// vulkan_guide.h : Include file for standard system include files,
+// vulkan_guide.h : Include file for standard system include files,
 // or project specific include files.
 
 #pragma once
@@ -49,7 +49,6 @@ struct LoadedGLTF : public IRenderable {
 
     std::vector<VkSampler> samplers;
 
-    DescriptorAllocatorGrowable descriptorPool;
 
     AllocatedBuffer materialDataBuffer;
 

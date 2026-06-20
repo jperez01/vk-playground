@@ -173,11 +173,6 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
 //< load_1
 //> load_2
     // we can stimate the descriptors we will need accurately
-    std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> sizes = { { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3 },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 } };
-
-    file.descriptorPool.init(engine->device, gltf.materials.size(), sizes);
 //< load_2
 //> load_samplers
 
@@ -478,7 +473,6 @@ void LoadedGLTF::clearAll()
     auto materialBuffer = materialDataBuffer;
     auto samplersToDestroy = samplers;
 
-    descriptorPool.destroy_pools(dv);
 
     vkutil::destroyBuffer(creator->allocator, materialBuffer);
 }
