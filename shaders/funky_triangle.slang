@@ -73,7 +73,7 @@ void mainImage( out float4 fragColor, in float2 fragCoord )
 }
 
 [shader("fragment")]
-void main(
+void fragmentMain(
 	in float3 inColor,
 	in float4 gl_FragCoord : SV_Position,
 	out float4 outFragColor : SV_Target0

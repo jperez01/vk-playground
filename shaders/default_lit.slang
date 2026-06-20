@@ -13,7 +13,7 @@ struct SceneData {
 
 
 [shader("fragment")]
-void main(
+void fragmentMain(
 	in float3 inColor,
 	out float4 outFragColor : SV_Target0
 ) 

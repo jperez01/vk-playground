@@ -21,7 +21,7 @@ struct constants {
 [[vk::push_constant]] ConstantBuffer<constants> PushConstants;
 
 [shader("vertex")]
-void main(
+void vertexMain(
 	uint gl_VertexIndex : SV_VertexID,
 	out float3 outColor,
 	out float2 outUV,

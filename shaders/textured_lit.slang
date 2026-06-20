@@ -10,7 +10,7 @@ struct SceneData {
 [[vk::binding(0, 2)]] Sampler2D tex1;
 
 [shader("fragment")]
-void main(
+void fragmentMain(
     float3 inColor,
     float2 texCoord,
     out float4 outFragColor : SV_Target0

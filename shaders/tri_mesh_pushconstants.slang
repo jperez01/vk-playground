@@ -5,7 +5,7 @@ struct constants {
 [[vk::push_constant]] ConstantBuffer<constants> PushConstants;
 
 [shader("vertex")]
-void main(
+void vertexMain(
 	float3 vPosition,
 	float3 vNormal,
 	float3 vColor,

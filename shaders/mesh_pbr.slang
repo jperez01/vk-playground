@@ -46,7 +46,7 @@ float3 calcIrradiance(float3 nor) {
 }
  
 [shader("fragment")]
-void main(
+void fragmentMain(
     float3 inNormal,
     float3 inColor,
     float2 inUV,

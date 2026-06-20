@@ -12,12 +12,14 @@ struct constants {
 };
 [[vk::push_constant]] ConstantBuffer<constants> PushConstants;
 
+struct VertexOutput {
+    [[vk::location(0)]] float2 outTexCoords;
+    float4 gl_Position : SV_Position;
+};
+
 [shader("vertex")]
-void main(
-    uint gl_VertexIndex : SV_VertexID,
-    out float2 outTexCoords,
-    out float4 gl_Position : SV_Position
-) {
+VertexOutput vertexMain(uint gl_VertexIndex : SV_VertexID) {
+    VertexOutput output;
     float3 positions[] = {
         float3(1.0, -1.0, 0.0),
         float3(1.0, 1.0, 0),
@@ -37,6 +39,17 @@ void main(
     float2 currentUv = uvs[gl_VertexIndex].xy;
     float3 currentPosition = positions[gl_VertexIndex].xyz;
 
-    outTexCoords = float2(currentUv.x, currentUv.y);
-    gl_Position = float4(currentPosition.x, currentPosition.y, 1.0, 1.0);
+    output.outTexCoords = float2(currentUv.x, currentUv.y);
+    output.gl_Position = float4(currentPosition.x, currentPosition.y, 1.0, 1.0);
+    
+    return output;
+}
+
+[[vk::binding(1, 0)]] Sampler2D colorTex;
+
+[shader("fragment")]
+float4 fragmentMain(VertexOutput input) : SV_Target0 {
+    float3 color = colorTex.Sample(input.outTexCoords).xyz;
+
+    return float4(input.outTexCoords, 1.0f, 1.0f);
 }
