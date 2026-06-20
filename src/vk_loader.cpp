@@ -14,7 +14,7 @@
 
 #include "utils/util.h"
 //> loadimg
-std::optional<AllocatedImage> load_image(VulkanEngine* engine, fastgltf::Asset& asset, fastgltf::Image& image)
+std::optional<AllocatedImage> load_image(VulkanEngine* engine, fastgltf::Asset& asset, fastgltf::Image& image, VkCommandBuffer cmd, std::vector<AllocatedBuffer>& stagingBuffers)
 {
     AllocatedImage newImage {};
 
@@ -37,7 +37,7 @@ std::optional<AllocatedImage> load_image(VulkanEngine* engine, fastgltf::Asset& 
                     imagesize.height = height;
                     imagesize.depth = 1;
 
-                    newImage = engine->create_image(data, imagesize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT,false);
+                    newImage = engine->create_image(cmd, stagingBuffers, data, imagesize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT,false);
 
                     stbi_image_free(data);
                 }
@@ -51,7 +51,7 @@ std::optional<AllocatedImage> load_image(VulkanEngine* engine, fastgltf::Asset& 
                     imagesize.height = height;
                     imagesize.depth = 1;
 
-                    newImage = engine->create_image(data, imagesize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT,false);
+                    newImage = engine->create_image(cmd, stagingBuffers, data, imagesize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT,false);
 
                     stbi_image_free(data);
                 }
@@ -74,7 +74,7 @@ std::optional<AllocatedImage> load_image(VulkanEngine* engine, fastgltf::Asset& 
                                        imagesize.height = height;
                                        imagesize.depth = 1;
 
-                                       newImage = engine->create_image(data, imagesize, VK_FORMAT_R8G8B8A8_UNORM,
+                                       newImage = engine->create_image(cmd, stagingBuffers, data, imagesize, VK_FORMAT_R8G8B8A8_UNORM,
                                            VK_IMAGE_USAGE_SAMPLED_BIT,false);
 
                                        stbi_image_free(data);
@@ -136,6 +136,17 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
     std::shared_ptr<LoadedGLTF> scene = std::make_shared<LoadedGLTF>();
     scene->creator = engine;
     LoadedGLTF& file = *scene.get();
+
+    std::vector<AllocatedBuffer> stagingBuffers;
+    VkCommandBuffer cmd = engine->immCommandBuffer;
+    vkResetFences(engine->device, 1, &engine->immFence);
+    vkResetCommandBuffer(cmd, 0);
+
+    VkCommandBufferBeginInfo cmdBeginInfo = {};
+    cmdBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    cmdBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &cmdBeginInfo);
+
 
     fastgltf::Parser parser {};
 
@@ -204,7 +215,7 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
 
     // load all textures
     for (fastgltf::Image& image : gltf.images) {
-        std::optional<AllocatedImage> img = load_image(engine, gltf, image);
+        std::optional<AllocatedImage> img = load_image(engine, gltf, image, cmd, stagingBuffers);
 
         if (img.has_value()) {
             images.push_back(*img);
@@ -380,7 +391,7 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
             newmesh->surfaces.push_back(newSurface);
         }
 
-        newmesh->meshBuffers = engine->uploadMesh(indices, vertices);
+        newmesh->meshBuffers = engine->uploadMesh(cmd, stagingBuffers, indices, vertices);
     }
 //> load_nodes
     // load all nodes and their meshes
@@ -436,6 +447,18 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
             node->refreshTransform(glm::mat4 { 1.f });
         }
     }
+    vkEndCommandBuffer(cmd);
+
+    VkCommandBufferSubmitInfo cmdinfo = vkinit::command_buffer_submit_info(cmd);
+    VkSubmitInfo2 submit = vkinit::submit_info(&cmdinfo, nullptr, nullptr);
+
+    vkQueueSubmit2(engine->graphicsQueue, 1, &submit, engine->immFence);
+    vkWaitForFences(engine->device, 1, &engine->immFence, true, 9999999999);
+
+    for (auto& buffer : stagingBuffers) {
+        vkutil::destroyBuffer(engine->allocator, buffer);
+    }
+
     return scene;
 //< load_graph
 }

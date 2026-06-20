@@ -248,6 +248,7 @@ public:
     // upload a mesh into a pair of gpu buffers. If descriptor allocator is not
     // null, it will also create a descriptor that points to the vertex buffer
 	GPUMeshBuffers uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
+	GPUMeshBuffers uploadMesh(VkCommandBuffer cmd, std::vector<AllocatedBuffer>& stagingBuffers, std::span<uint32_t> indices, std::span<Vertex> vertices);
 	void handleImGui();
 	void resize_swapchain();
 
@@ -255,6 +256,7 @@ public:
     FrameData& get_last_frame();
 
     AllocatedImage create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
+    AllocatedImage create_image(VkCommandBuffer cmd, std::vector<AllocatedBuffer>& stagingBuffers, void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
 
     void immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function);
 
