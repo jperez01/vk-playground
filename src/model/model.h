@@ -31,7 +31,6 @@ struct TextureInfo {
 struct MaterialInfo {
     std::vector<std::string> texturePaths;
     std::vector<std::string> textureFileTypes;
-    VkDescriptorSet materialSet;
 };
 
 class Model {

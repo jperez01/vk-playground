@@ -1,13 +1,4 @@
-struct SceneData {
-    float4x4 view;
-    float4x4 proj;
-    float4x4 viewproj;
-    float4 ambientColor;
-    float4 sunlightDirection; //w for sun power
-    float4 sunlightColor;
-};
-[[vk::binding(0, 0)]] ConstantBuffer<SceneData> sceneData;
-
+#include "input_structures.slang"
 struct Vertex {
     float3 position;
     float uv_x;
@@ -19,11 +10,10 @@ struct Vertex {
 struct constants {
     float4x4 modelMatrix;
     Vertex* vertexBuffer;
+    GLTFMaterialData* material;
 };
 [[vk::push_constant]] ConstantBuffer<constants> PushConstants;
 
-[[vk::binding(1, 1)]] Sampler2D colorTex;
-[[vk::binding(2, 1)]] Sampler2D normalTex;
 
 struct VertexOutput {
     [[vk::location(0)]] float3 outNormal;
@@ -50,9 +40,8 @@ void fragmentMain(
     VertexOutput input,
     out float4 outFragColor : SV_Target0
 ) {
-    float3 color = colorTex.Sample(input.outTexCoords).xyz;
-    float3 normal = normalTex.Sample(input.outTexCoords).xyz;
-
+    float3 color = globalTextures[PushConstants.material[0].colorTexID].Sample(input.outTexCoords).xyz;
+    float3 normal = globalTextures[PushConstants.material[0].metalRoughTexID].Sample(input.outTexCoords).xyz;
     float3 lightDir = -sceneData.sunlightDirection.xyz;
     float multiplier = dot(lightDir, normalize(input.outNormal));
 

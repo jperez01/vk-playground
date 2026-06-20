@@ -11,6 +11,7 @@ struct Vertex {
 struct PushConstantsT {
     float4x4 render_matrix;
     Vertex* vertexBuffer;
+    GLTFMaterialData* material;
 };
 
 [[vk::push_constant]]
@@ -32,8 +33,7 @@ VertexOutput vertexMain(uint gl_VertexIndex : SV_VertexID) {
 
     output.gl_Position = mul(mul(sceneData.viewproj, PushConstants.render_matrix), position);
 
-    output.outNormal = mul(PushConstants.render_matrix, float4(v.normal, 0.f)).xyz;
-    output.outColor = v.color.xyz * materialData.colorFactors.xyz;
+    output.outColor = v.color.xyz * PushConstants.material[0].colorFactors.xyz;
     output.outUV.x = v.uv_x;
     output.outUV.y = v.uv_y;
 
@@ -83,7 +83,7 @@ float4 fragmentMain(VertexOutput input) : SV_Target0 {
 
     float3 irradiance = calcIrradiance(input.outNormal); 
 
-    float3 color = input.outColor * colorTex.Sample(input.outUV).xyz;
+    float3 color = input.outColor * globalTextures[PushConstants.material[0].colorTexID].Sample(input.outUV).xyz;
 
     return float4(color * lightValue + color * irradiance.x * float3(0.2f) ,1.0f);
 }

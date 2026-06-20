@@ -1,4 +1,4 @@
-﻿#include "vk_engine.h"
+#include "vk_engine.h"
 
 #include "vk_images.h"
 #include "vk_loader.h"
@@ -543,24 +543,10 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
         }
     });
 
-    //allocate a new uniform buffer for the scene data
-    AllocatedBuffer gpuSceneDataBuffer =  vkutil::createBuffer(allocator, sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-
-    //add it to the deletion queue of this frame so it gets deleted once its been used
-    get_current_frame()._deletionQueue.push_function([=,this](){
-        vkutil::destroyBuffer(allocator, gpuSceneDataBuffer);
-    });
-
     //write the buffer
     GPUSceneData* sceneUniformData = (GPUSceneData*)gpuSceneDataBuffer.allocation->GetMappedData();
     *sceneUniformData = sceneData;
 
-    //create a descriptor set that binds that buffer and update it
-    VkDescriptorSet globalDescriptor = get_current_frame()._frameDescriptors.allocate(device, gpuSceneDataDescriptorLayout);
-
-	DescriptorWriter writer;
-	writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-	writer.update_set(device, globalDescriptor);
 
     MaterialPipeline* lastPipeline = nullptr;
     MaterialInstance* lastMaterial = nullptr;
@@ -594,9 +580,6 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
 
 				vkCmdSetScissor(cmd, 0, 1, &scissor);
             }
-
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r.material->pipeline->layout, 1, 1,
-                &r.material->materialSet, 0, nullptr);
         }
         if (r.indexBuffer != lastIndexBuffer) {
             lastIndexBuffer = r.indexBuffer;
@@ -606,8 +589,9 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
         GPUDrawPushConstants push_constants{};
         push_constants.worldMatrix = r.transform;
         push_constants.vertexBuffer = r.vertexBufferAddress;
+        push_constants.materialBuffer = r.material->materialBuffer;
 
-        vkCmdPushConstants(cmd, r.material->pipeline->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
+        vkCmdPushConstants(cmd, r.material->pipeline->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
 
         stats.drawcall_count++;
         stats.triangle_count += r.indexCount / 3;
@@ -628,9 +612,6 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
 			GPUMeshBuffers& meshBuffer = model.gpuMeshBuffers[i];
 			Mesh& meshData = model.meshes[i];
 			MaterialInfo& currentMaterialInfo = model.materialInfo[meshData.materialIndex];
-
-			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, someData.material->pipeline->layout, 1, 1,
-				&currentMaterialInfo.materialSet, 0, nullptr);
 
 			vkCmdBindIndexBuffer(cmd, meshBuffer.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 			GPUDrawPushConstants push_constants{};
@@ -842,12 +823,18 @@ void VulkanEngine::init_vulkan()
    VkPhysicalDeviceVulkan12Features features12 {};
    features12.bufferDeviceAddress = true;
    features12.descriptorIndexing = true;
-	features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+   features12.descriptorBindingPartiallyBound = true;
+   features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+
+   VkPhysicalDeviceVulkan11Features features11 {};
+   features11.shaderDrawParameters = true;
+   features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
 
     // use vkbootstrap to select a gpu.
     // We want a gpu that can write to the SDL surface and supports vulkan 1.2
     vkb::PhysicalDeviceSelector selector { vkb_inst };
-    vkb::PhysicalDevice physicalDevice = selector.set_minimum_version(1, 3).set_required_features_13(features13).set_required_features_12(features12).set_surface(surface).select().value();
+    vkb::PhysicalDevice physicalDevice = selector.set_minimum_version(1, 3).set_required_features_13(features13).set_required_features_12(features12).set_required_features_11(features11).set_surface(surface).select().value();
+
 
     // physicalDevice.features.
     // create the final vulkan device
@@ -1156,8 +1143,9 @@ void VulkanEngine::init_descriptors()
     // create a descriptor pool
     std::vector<DescriptorAllocator::PoolSizeRatio> sizes = {
         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 3 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3 },
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3 },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 10 },
     };
 
     globalDescriptorAllocator.init_pool(device, 100, sizes);
@@ -1172,7 +1160,14 @@ void VulkanEngine::init_descriptors()
     {
         DescriptorLayoutBuilder builder;
         builder.add_binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-        gpuSceneDataDescriptorLayout = builder.build(device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+        builder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000); // Global texture array
+
+        VkDescriptorBindingFlags bindFlags[2] = { 0, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT };
+        VkDescriptorSetLayoutBindingFlagsCreateInfo extendedInfo = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO };
+        extendedInfo.bindingCount = 2;
+        extendedInfo.pBindingFlags = bindFlags;
+        
+        gpuSceneDataDescriptorLayout = builder.build(device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, &extendedInfo, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
     }
 
     mainDeletionQueue.push_function([&]() {
@@ -1181,10 +1176,21 @@ void VulkanEngine::init_descriptors()
     });
 
     drawImageDescriptors = globalDescriptorAllocator.allocate(device, drawImageDescriptorLayout);
+    globalDescriptor = globalDescriptorAllocator.allocate(device, gpuSceneDataDescriptorLayout);
+    gpuSceneDataBuffer = vkutil::createBuffer(allocator, sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    mainDeletionQueue.push_function([&]() {
+        vkutil::destroyBuffer(allocator, gpuSceneDataBuffer);
+    });
+
     {
         DescriptorWriter writer;
 		writer.write_image(0, drawImage.imageView, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
         writer.update_set(device, drawImageDescriptors);
+    }
+    {
+        DescriptorWriter writer;
+        writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+        writer.update_set(device, globalDescriptor);
     }
 	for (int i = 0; i < FRAME_OVERLAP; i++) {
 		// create a descriptor pool
@@ -1218,20 +1224,13 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine* engine)
 	VkPushConstantRange matrixRange{};
 	matrixRange.offset = 0;
 	matrixRange.size = sizeof(GPUDrawPushConstants);
-	matrixRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	matrixRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    DescriptorLayoutBuilder layoutBuilder;
-    layoutBuilder.add_binding(0,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-    layoutBuilder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-	layoutBuilder.add_binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
-    materialLayout = layoutBuilder.build(engine->device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
-
-	VkDescriptorSetLayout layouts[] = { engine->gpuSceneDataDescriptorLayout,
-        materialLayout };
+	VkDescriptorSetLayout layouts[] = { engine->gpuSceneDataDescriptorLayout };
 
 	VkPipelineLayoutCreateInfo mesh_layout_info = vkinit::pipeline_layout_create_info();
-	mesh_layout_info.setLayoutCount = 2;
+	mesh_layout_info.setLayoutCount = 1;
 	mesh_layout_info.pSetLayouts = layouts;
 	mesh_layout_info.pPushConstantRanges = &matrixRange;
 	mesh_layout_info.pushConstantRangeCount = 1;
@@ -1392,8 +1391,6 @@ void VulkanEngine::sendModelDataToGpu(Model& model) {
 		descriptorLayoutBuilder.add_binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 		descriptorLayoutBuilder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 		descriptorLayoutBuilder.add_binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-		auto materialSetLayout = descriptorLayoutBuilder.build(device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
-		materialInfo.materialSet = globalDescriptorAllocator.allocate(device, materialSetLayout);
 
 		DescriptorWriter descriptorWriter;
 		for (unsigned int j = 0; j < materialInfo.texturePaths.size(); j++) {
@@ -1413,7 +1410,6 @@ void VulkanEngine::sendModelDataToGpu(Model& model) {
 				descriptorWriter.write_image(bindingIndex, textureImage.imageView, defaultSamplerLinear, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 			}
 		}
-		descriptorWriter.update_set(device, materialInfo.materialSet);
 	}
 
 	importedModels.push_back(model);
@@ -1436,24 +1432,23 @@ void VulkanEngine::handleImGui() {
 	ImGui::Text("draws %i", stats.drawcall_count);
 	ImGui::End();
 
-	if (ImGui::Begin("background")) {
+	ImGui::Begin("background");
 
-		ComputeEffect& selected = backgroundEffects[currentBackgroundEffect];
+	ComputeEffect& selected = backgroundEffects[currentBackgroundEffect];
 
-		ImGui::Text("Selected effect: ", selected.name);
+	ImGui::Text("Selected effect: ", selected.name);
 
-		ImGui::SliderInt("Effect Index", &currentBackgroundEffect, 0, backgroundEffects.size() - 1);
+	ImGui::SliderInt("Effect Index", &currentBackgroundEffect, 0, backgroundEffects.size() - 1);
 
-		ImGui::InputFloat4("data1", (float*)&selected.data.data1);
-		ImGui::InputFloat4("data2", (float*)&selected.data.data2);
-		ImGui::InputFloat4("data3", (float*)&selected.data.data3);
-		ImGui::InputFloat4("data4", (float*)&selected.data.data4);
+	ImGui::InputFloat4("data1", (float*)&selected.data.data1);
+	ImGui::InputFloat4("data2", (float*)&selected.data.data2);
+	ImGui::InputFloat4("data3", (float*)&selected.data.data3);
+	ImGui::InputFloat4("data4", (float*)&selected.data.data4);
 
-		ImGui::SliderFloat4("Sunlight Color", (float*)&sceneData.sunlightColor, 0.0f, 1.0f);
-		ImGui::SliderFloat4("Sunlight Direction", (float*)&sceneData.sunlightDirection, -1.0f, 1.0f);
+	ImGui::SliderFloat4("Sunlight Color", (float*)&sceneData.sunlightColor, 0.0f, 1.0f);
+	ImGui::SliderFloat4("Sunlight Direction", (float*)&sceneData.sunlightDirection, -1.0f, 1.0f);
 
-		ImGui::End();
-	}
+	ImGui::End();
 
 	ImGui::Render();
 }
@@ -1480,11 +1475,6 @@ void GLTFMetallic_Roughness::clear_resources(VkDevice device)
 	}
 	opaquePipeline.layout = VK_NULL_HANDLE;
 	transparentPipeline.layout = VK_NULL_HANDLE;
-
-	if (materialLayout != VK_NULL_HANDLE) {
-		vkDestroyDescriptorSetLayout(device, materialLayout, nullptr);
-		materialLayout = VK_NULL_HANDLE;
-	}
 }
 
 MaterialInstance GLTFMetallic_Roughness::write_material(VkDevice device, MaterialPass pass, const MaterialResources& resources, DescriptorAllocatorGrowable& descriptorAllocator)
@@ -1498,7 +1488,6 @@ MaterialInstance GLTFMetallic_Roughness::write_material(VkDevice device, Materia
 		matData.pipeline = &opaquePipeline;
 	}
 
-	matData.materialSet = descriptorAllocator.allocate(device,materialLayout);
     
    
     writer.clear();
@@ -1506,7 +1495,6 @@ MaterialInstance GLTFMetallic_Roughness::write_material(VkDevice device, Materia
     writer.write_image(1, resources.colorImage.imageView, resources.colorSampler,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     writer.write_image(2, resources.metalRoughImage.imageView, resources.metalRoughSampler,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
-    writer.update_set(device,matData.materialSet);
 
     return matData;
 }
@@ -1533,6 +1521,26 @@ void MeshNode::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
 
     // recurse down
     Node::Draw(topMatrix, ctx);
+}
+int VulkanEngine::add_global_texture(VkImageView view, VkSampler sampler)
+{
+    int index = globalTextureCount++;
+    VkDescriptorImageInfo imageInfo{};
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imageInfo.imageView = view;
+    imageInfo.sampler = sampler;
+
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = globalDescriptor;
+    write.dstBinding = 1;
+    write.dstArrayElement = index;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.descriptorCount = 1;
+    write.pImageInfo = &imageInfo;
+
+    vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+    return index;
 }
 
 

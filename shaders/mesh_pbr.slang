@@ -4,6 +4,15 @@
 
 
 #define USE_BINDLESS
+struct PushConstantsT {
+    float4x4 render_matrix;
+    float4* vertexBuffer;
+    GLTFMaterialData* material;
+};
+
+[[vk::push_constant]]
+ConstantBuffer<PushConstantsT> PushConstants;
+
 #include "input_structures.slang"
 
 
@@ -58,8 +67,8 @@ void fragmentMain(
 
 
 	//float3 color = inColor * colorTex.Sample(inUV).xyz;
-    int colorID = materialData.colorTexID;
-    float3 color = inColor * allTextures[colorID].Sample(inUV).xyz;
+    int colorID = PushConstants.material[0].colorTexID;
+    float3 color = inColor * globalTextures[colorID].Sample(inUV).xyz;
 
 	outFragColor = float4(color * lightValue + color * irradiance.x * float3(0.2f) ,1.0f);
 }

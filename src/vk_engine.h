@@ -1,4 +1,4 @@
-﻿// vulkan_guide.h : Include file for standard system include files,
+// vulkan_guide.h : Include file for standard system include files,
 // or project specific include files.
 
 #pragma once
@@ -103,7 +103,6 @@ struct GLTFMetallic_Roughness {
     MaterialPipeline opaquePipeline;
     MaterialPipeline transparentPipeline;
 
-    VkDescriptorSetLayout materialLayout;
 
     struct MaterialConstants {
 		glm::vec4 colorFactors;
@@ -176,6 +175,9 @@ public:
 
 	VkDescriptorSet drawImageDescriptors;
 	VkDescriptorSetLayout drawImageDescriptorLayout;
+    VkDescriptorSet globalDescriptor;
+    uint32_t globalTextureCount{ 0 };
+    int add_global_texture(VkImageView view, VkSampler sampler);
 
     DeletionQueue mainDeletionQueue;
 
@@ -210,8 +212,8 @@ public:
 	
     GPUMeshBuffers rectangle;
     DrawContext drawCommands;
-
     GPUSceneData sceneData;
+    AllocatedBuffer gpuSceneDataBuffer;
 
     Camera mainCamera;
 
