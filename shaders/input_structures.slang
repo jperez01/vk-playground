@@ -9,12 +9,6 @@ struct SceneData {
 
 [[vk::binding(0, 0)]] ConstantBuffer<SceneData> sceneData;
 
-#ifdef USE_BINDLESS
-[[vk::binding(1, 0)]] Sampler2D allTextures[];
-#else
-[[vk::binding(1, 1)]] Sampler2D colorTex;
-[[vk::binding(2, 1)]] Sampler2D metalRoughTex;
-#endif
 
 struct GLTFMaterialData {
     float4 colorFactors;
@@ -23,4 +17,4 @@ struct GLTFMaterialData {
     int metalRoughTexID;
 };
 
-[[vk::binding(0, 1)]] ConstantBuffer<GLTFMaterialData> materialData;
+[[vk::binding(1, 0)]] Sampler2D globalTextures[];

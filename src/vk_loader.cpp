@@ -1,4 +1,4 @@
-﻿#include "stb_image.h"
+#include "stb_image.h"
 #include <iostream>
 #include <vk_loader.h>
 
@@ -224,10 +224,14 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
 
 //> load_buffer
     // create buffer to hold the material data
-    file.materialDataBuffer = vkutil::createBuffer(engine->allocator, sizeof(GLTFMetallic_Roughness::MaterialConstants) * gltf.materials.size(),
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    file.materialDataBuffer = vkutil::createBuffer(engine->allocator, sizeof(GPUGLTFMaterial) * gltf.materials.size(),
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+    VkBufferDeviceAddressInfo deviceAddressInfo{ .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = file.materialDataBuffer.buffer };
+    VkDeviceAddress materialBufferAddress = vkGetBufferDeviceAddress(engine->device, &deviceAddressInfo);
+
     int data_index = 0;
-    GLTFMetallic_Roughness::MaterialConstants* sceneMaterialConstants = (GLTFMetallic_Roughness::MaterialConstants*)file.materialDataBuffer.info.pMappedData;
+    GPUGLTFMaterial* sceneMaterialConstants = (GPUGLTFMaterial*)file.materialDataBuffer.info.pMappedData;
 //< load_buffer
     //
 //> load_material
@@ -236,7 +240,7 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
         materials.push_back(newMat);
         file.materials[mat.name.c_str()] = newMat;
 
-        GLTFMetallic_Roughness::MaterialConstants constants;
+        GPUGLTFMaterial constants{};
         constants.colorFactors.x = mat.pbrData.baseColorFactor[0];
         constants.colorFactors.y = mat.pbrData.baseColorFactor[1];
         constants.colorFactors.z = mat.pbrData.baseColorFactor[2];
@@ -244,34 +248,38 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
 
         constants.metal_rough_factors.x = mat.pbrData.metallicFactor;
         constants.metal_rough_factors.y = mat.pbrData.roughnessFactor;
-        // write material parameters to buffer
-        sceneMaterialConstants[data_index] = constants;
 
         MaterialPass passType = MaterialPass::MainColor;
         if (mat.alphaMode == fastgltf::AlphaMode::Blend) {
             passType = MaterialPass::Transparent;
         }
 
-        GLTFMetallic_Roughness::MaterialResources materialResources;
-        // default the material textures
-        materialResources.colorImage = engine->whiteImage;
-        materialResources.colorSampler = engine->defaultSamplerLinear;
-        materialResources.metalRoughImage = engine->whiteImage;
-        materialResources.metalRoughSampler = engine->defaultSamplerLinear;
-
-        // set the uniform buffer for the material data
-        materialResources.dataBuffer = file.materialDataBuffer.buffer;
-        materialResources.dataBufferOffset = data_index * sizeof(GLTFMetallic_Roughness::MaterialConstants);
         // grab textures from gltf file
         if (mat.pbrData.baseColorTexture.has_value()) {
             size_t img = gltf.textures[mat.pbrData.baseColorTexture.value().textureIndex].imageIndex.value();
             size_t sampler = gltf.textures[mat.pbrData.baseColorTexture.value().textureIndex].samplerIndex.value();
 
-            materialResources.colorImage = images[img];
-            materialResources.colorSampler = file.samplers[sampler];
+            constants.colorTexID = engine->add_global_texture(images[img].imageView, file.samplers[sampler]);
+        } else {
+            constants.colorTexID = engine->add_global_texture(engine->whiteImage.imageView, engine->defaultSamplerLinear);
         }
-        // build material
-        newMat->data = engine->metalRoughMaterial.write_material(engine->device, passType, materialResources, file.descriptorPool);
+
+        if (mat.pbrData.metallicRoughnessTexture.has_value()) {
+            size_t img = gltf.textures[mat.pbrData.metallicRoughnessTexture.value().textureIndex].imageIndex.value();
+            size_t sampler = gltf.textures[mat.pbrData.metallicRoughnessTexture.value().textureIndex].samplerIndex.value();
+
+            constants.metalRoughTexID = engine->add_global_texture(images[img].imageView, file.samplers[sampler]);
+        } else {
+            constants.metalRoughTexID = engine->add_global_texture(engine->whiteImage.imageView, engine->defaultSamplerLinear);
+        }
+
+        // write material parameters to buffer
+        sceneMaterialConstants[data_index] = constants;
+
+        // build material instance
+        newMat->data.passType = passType;
+        newMat->data.pipeline = (passType == MaterialPass::Transparent) ? &engine->metalRoughMaterial.transparentPipeline : &engine->metalRoughMaterial.opaquePipeline;
+        newMat->data.materialBuffer = materialBufferAddress + (data_index * sizeof(GPUGLTFMaterial));
 
         data_index++;
     }

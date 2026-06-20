@@ -1,4 +1,4 @@
-﻿// vulkan_guide.h : Include file for standard system include files,
+// vulkan_guide.h : Include file for standard system include files,
 // or project specific include files.
 //> intro
 #pragma once
@@ -42,10 +42,11 @@ struct AllocatedBuffer {
 struct GPUGLTFMaterial {
     glm::vec4 colorFactors;
     glm::vec4 metal_rough_factors;
-    glm::vec4 extra[14];
+    int colorTexID;
+    int metalRoughTexID;
+    int padding[2];
 };
 
-static_assert(sizeof(GPUGLTFMaterial) == 256);
 
 struct GPUSceneData {
     glm::mat4 view;
@@ -66,10 +67,9 @@ struct MaterialPipeline {
 	VkPipeline pipeline;
 	VkPipelineLayout layout;
 };
-
 struct MaterialInstance {
     MaterialPipeline* pipeline;
-    VkDescriptorSet materialSet;
+    VkDeviceAddress materialBuffer;
     MaterialPass passType;
 };
 //< mat_types
@@ -95,6 +95,7 @@ struct GPUMeshBuffers {
 struct GPUDrawPushConstants {
     glm::mat4 worldMatrix;
     VkDeviceAddress vertexBuffer;
+    VkDeviceAddress materialBuffer;
 };
 //< vbuf_types
 
