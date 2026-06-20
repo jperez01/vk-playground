@@ -77,7 +77,6 @@ struct FrameData {
 	VkSemaphore _swapchainSemaphore, _renderSemaphore;
 	VkFence _renderFence;
 
-    DescriptorAllocatorGrowable _frameDescriptors;
     DeletionQueue _deletionQueue;
 
     VkCommandPool _commandPool;
@@ -120,12 +119,10 @@ struct GLTFMetallic_Roughness {
         uint32_t dataBufferOffset;
     };
 
-    DescriptorWriter writer;
-
     void build_pipelines(VulkanEngine* engine);
     void clear_resources(VkDevice device);
 
-    MaterialInstance write_material(VkDevice device,MaterialPass pass,const MaterialResources& resources , DescriptorAllocatorGrowable& descriptorAllocator);
+    MaterialInstance write_material(VkDevice device, MaterialPass pass, const MaterialResources& resources);
 };
 
 struct MeshNode : public Node {

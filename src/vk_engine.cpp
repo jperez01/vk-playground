@@ -348,7 +348,6 @@ void VulkanEngine::draw()
 	VK_CHECK(vkWaitForFences(device, FRAME_OVERLAP, frameFences.data(), true, 1000000000));
 
 	get_current_frame()._deletionQueue.flush();
-    get_current_frame()._frameDescriptors.clear_pools(device);
 	//request image from the swapchain
 	uint32_t swapchainImageIndex;
 
@@ -1183,30 +1182,36 @@ void VulkanEngine::init_descriptors()
     });
 
     {
-        DescriptorWriter writer;
-		writer.write_image(0, drawImage.imageView, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
-        writer.update_set(device, drawImageDescriptors);
+        VkDescriptorImageInfo imgInfo{};
+        imgInfo.imageView = drawImage.imageView;
+        imgInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = drawImageDescriptors;
+        write.dstBinding = 0;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        write.pImageInfo = &imgInfo;
+
+        vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
     }
     {
-        DescriptorWriter writer;
-        writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-        writer.update_set(device, globalDescriptor);
-    }
-	for (int i = 0; i < FRAME_OVERLAP; i++) {
-		// create a descriptor pool
-		std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> frame_sizes = {
-			{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 3 },
-			{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3 },
-			{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3 },
-			{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 },
-		};
+        VkDescriptorBufferInfo bufInfo{};
+        bufInfo.buffer = gpuSceneDataBuffer.buffer;
+        bufInfo.offset = 0;
+        bufInfo.range = sizeof(GPUSceneData);
 
-		frames[i]._frameDescriptors = DescriptorAllocatorGrowable{};
-		frames[i]._frameDescriptors.init(device, 1000, frame_sizes);
-		mainDeletionQueue.push_function([&, i]() {
-			frames[i]._frameDescriptors.destroy_pools(device);
-		});
-	}
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = globalDescriptor;
+        write.dstBinding = 0;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        write.pBufferInfo = &bufInfo;
+
+        vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+    }
 }
 
 void GLTFMetallic_Roughness::build_pipelines(VulkanEngine* engine)
@@ -1288,10 +1293,20 @@ void VulkanEngine::init_post_process_pipeline() {
 
 	postProcessDescriptorSet = globalDescriptorAllocator.allocate(device, postProcessImageLayout);
 	{
-		DescriptorWriter writer;
-		writer.clear();
-		writer.write_image(1, drawImage.imageView, defaultSamplerLinear, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-		writer.update_set(device, postProcessDescriptorSet);
+		VkDescriptorImageInfo imgInfo{};
+		imgInfo.imageView = drawImage.imageView;
+		imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		imgInfo.sampler = defaultSamplerLinear;
+
+		VkWriteDescriptorSet write{};
+		write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		write.dstSet = postProcessDescriptorSet;
+		write.dstBinding = 1;
+		write.descriptorCount = 1;
+		write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		write.pImageInfo = &imgInfo;
+
+		vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
 	}
 	VkPushConstantRange matrixRange{};
 	matrixRange.offset = 0;
@@ -1386,31 +1401,6 @@ void VulkanEngine::sendModelDataToGpu(Model& model) {
 		model.gpuTextures[path] = gpuTexture;
 	}
 
-	for (MaterialInfo& materialInfo : model.materialInfo) {
-		DescriptorLayoutBuilder descriptorLayoutBuilder;
-		descriptorLayoutBuilder.add_binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-		descriptorLayoutBuilder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-		descriptorLayoutBuilder.add_binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-
-		DescriptorWriter descriptorWriter;
-		for (unsigned int j = 0; j < materialInfo.texturePaths.size(); j++) {
-			auto currentPath = materialInfo.texturePaths[j];
-			auto currentType = materialInfo.textureFileTypes[j];
-
-			int bindingIndex = 0;
-			if (currentType == "texture_diffuse") {
-				bindingIndex = 1;
-			} else if (currentType == "texture_normal") {
-				bindingIndex = 2;
-			}
-
-			AllocatedImage& textureImage = model.gpuTextures[currentPath];
-
-			if (bindingIndex != 0) {
-				descriptorWriter.write_image(bindingIndex, textureImage.imageView, defaultSamplerLinear, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-			}
-		}
-	}
 
 	importedModels.push_back(model);
 }
@@ -1477,7 +1467,7 @@ void GLTFMetallic_Roughness::clear_resources(VkDevice device)
 	transparentPipeline.layout = VK_NULL_HANDLE;
 }
 
-MaterialInstance GLTFMetallic_Roughness::write_material(VkDevice device, MaterialPass pass, const MaterialResources& resources, DescriptorAllocatorGrowable& descriptorAllocator)
+MaterialInstance GLTFMetallic_Roughness::write_material(VkDevice device, MaterialPass pass, const MaterialResources& resources)
 {
     MaterialInstance matData;
 	matData.passType = pass;
@@ -1487,14 +1477,6 @@ MaterialInstance GLTFMetallic_Roughness::write_material(VkDevice device, Materia
 	else {
 		matData.pipeline = &opaquePipeline;
 	}
-
-    
-   
-    writer.clear();
-    writer.write_buffer(0,resources.dataBuffer,sizeof(MaterialConstants),resources.dataBufferOffset,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-    writer.write_image(1, resources.colorImage.imageView, resources.colorSampler,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-    writer.write_image(2, resources.metalRoughImage.imageView, resources.metalRoughSampler,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-
 
     return matData;
 }
