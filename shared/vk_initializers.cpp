@@ -105,6 +105,24 @@ VkSubmitInfo2 vkinit::submit_info(VkCommandBufferSubmitInfo* cmd, VkSemaphoreSub
 
     return info;
 }
+VkSubmitInfo2 vkinit::submit_info(VkCommandBufferSubmitInfo* cmd, uint32_t signalSemaphoreInfoCount, VkSemaphoreSubmitInfo* signalSemaphoreInfo,
+    uint32_t waitSemaphoreInfoCount, VkSemaphoreSubmitInfo* waitSemaphoreInfo)
+{
+    VkSubmitInfo2 info = {};
+    info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+    info.pNext = nullptr;
+
+    info.waitSemaphoreInfoCount = waitSemaphoreInfoCount;
+    info.pWaitSemaphoreInfos = waitSemaphoreInfo;
+
+    info.signalSemaphoreInfoCount = signalSemaphoreInfoCount;
+    info.pSignalSemaphoreInfos = signalSemaphoreInfo;
+
+    info.commandBufferInfoCount = 1;
+    info.pCommandBufferInfos = cmd;
+
+    return info;
+}
 //< init_submit
 
 VkPresentInfoKHR vkinit::present_info()

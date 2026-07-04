@@ -157,11 +157,12 @@ void VulkanEngine::cleanup()
 	greyImage = {};
 	errorCheckerboardImage = {};
 	defaultGLTFMaterialData = {};
-	gpuSceneDataBuffer = {};
 	rectangle = {};
     loadedScenes.clear();
+    brickadiaScene.clear();
 
     for (auto& frame : frames) {
+        frame.sceneDataBuffer = {};
         frame._garbage.flush(device, allocator);
     }
 
@@ -171,10 +172,10 @@ void VulkanEngine::cleanup()
 
 	for (int i = 0; i < FRAME_OVERLAP; i++) {
 		vkDestroyCommandPool(device, frames[i]._commandPool, nullptr);
-		vkDestroyFence(device, frames[i]._renderFence, nullptr);
 		vkDestroySemaphore(device, frames[i]._swapchainSemaphore, nullptr);
 		vkDestroySemaphore(device, frames[i]._renderSemaphore, nullptr);
 	}
+	vkDestroySemaphore(device, _timelineSemaphore, nullptr);
 
 	vkDestroyCommandPool(device, immCommandPool, nullptr);
 	vkDestroyFence(device, immFence, nullptr);
@@ -395,12 +396,17 @@ void VulkanEngine::defer_destroy(VkSampler sampler) {
 
 void VulkanEngine::draw()
 {
-	// Shared draw/depth images are reused across frame slots, so wait all frame fences.
-	std::array<VkFence, FRAME_OVERLAP> frameFences{};
-	for (int i = 0; i < FRAME_OVERLAP; i++) {
-		frameFences[i] = frames[i]._renderFence;
+	if (_timelineValue > 0) {
+		VkSemaphoreWaitInfo waitInfo{};
+		waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+		waitInfo.pNext = nullptr;
+		waitInfo.flags = 0;
+		waitInfo.semaphoreCount = 1;
+		waitInfo.pSemaphores = &_timelineSemaphore;
+		waitInfo.pValues = &_timelineValue;
+
+		VK_CHECK(vkWaitSemaphores(device, &waitInfo, 1000000000));
 	}
-	VK_CHECK(vkWaitForFences(device, FRAME_OVERLAP, frameFences.data(), true, 1000000000));
 
 	get_current_frame()._garbage.flush(device, allocator);
 	//request image from the swapchain
@@ -415,7 +421,6 @@ void VulkanEngine::draw()
 	drawExtent.height = std::min(swapchainExtent.height, drawImage.imageExtent.height) * renderScale;
 	drawExtent.width = std::min(swapchainExtent.width, drawImage.imageExtent.width) * renderScale;
 
-	VK_CHECK(vkResetFences(device, 1, &get_current_frame()._renderFence));
 
 	//now that we are sure that the commands finished executing, we can safely reset the command buffer to begin recording again.
 	VK_CHECK(vkResetCommandBuffer(get_current_frame()._mainCommandBuffer, 0));
@@ -503,14 +508,19 @@ void VulkanEngine::draw()
 
 	VkCommandBufferSubmitInfo cmdinfo = vkinit::command_buffer_submit_info(cmd);
 
-	VkSemaphoreSubmitInfo waitInfo = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, get_current_frame()._swapchainSemaphore);
-	VkSemaphoreSubmitInfo signalInfo = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, swapchainRenderSemaphores[swapchainImageIndex]);
+    _timelineValue++;
+    get_current_frame()._frameTimelineValue = _timelineValue;
 
-	VkSubmitInfo2 submit = vkinit::submit_info(&cmdinfo, &signalInfo, &waitInfo);
+	VkSemaphoreSubmitInfo waitInfo = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR, get_current_frame()._swapchainSemaphore);
 
-	//submit command buffer to the queue and execute it.
-	// _renderFence will now block until the graphic commands finish execution
-	VK_CHECK(vkQueueSubmit2(graphicsQueue, 1, &submit, get_current_frame()._renderFence));
+	VkSemaphoreSubmitInfo signalInfos[2];
+	signalInfos[0] = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, swapchainRenderSemaphores[swapchainImageIndex]);
+	signalInfos[1] = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, _timelineSemaphore);
+	signalInfos[1].value = _timelineValue;
+
+	VkSubmitInfo2 submit = vkinit::submit_info(&cmdinfo, 2, signalInfos, 1, &waitInfo);
+
+	VK_CHECK(vkQueueSubmit2(graphicsQueue, 1, &submit, VK_NULL_HANDLE));
 
 	//prepare present
 	// this will put the image we just rendered to into the visible window.
@@ -598,7 +608,7 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
     });
 
     //write the buffer
-    GPUSceneData* sceneUniformData = (GPUSceneData*)gpuSceneDataBuffer.allocation->GetMappedData();
+    GPUSceneData* sceneUniformData = (GPUSceneData*)get_current_frame().sceneDataBuffer.allocation->GetMappedData();
     *sceneUniformData = sceneData;
 
 
@@ -614,7 +624,7 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
                 lastPipeline = r.material->pipeline;
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r.material->pipeline->pipeline);
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,r.material->pipeline->layout, 0, 1,
-                    &globalDescriptor, 0, nullptr);
+                    &get_current_frame().globalDescriptor, 0, nullptr);
 
 				VkViewport viewport = {};
 				viewport.x = 0;
@@ -1102,7 +1112,17 @@ void VulkanEngine::destroy_swapchain()
 
 void VulkanEngine::resize_swapchain()
 {
-	vkDeviceWaitIdle(device);
+    if (_timelineValue > 0) {
+        VkSemaphoreWaitInfo waitInfo{};
+        waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+        waitInfo.pNext = nullptr;
+        waitInfo.flags = 0;
+        waitInfo.semaphoreCount = 1;
+        waitInfo.pSemaphores = &_timelineSemaphore;
+        waitInfo.pValues = &_timelineValue;
+
+        VK_CHECK(vkWaitSemaphores(device, &waitInfo, 1000000000));
+    }
 
 	destroy_swapchain();
 
@@ -1151,15 +1171,23 @@ void VulkanEngine::init_sync_structures()
     VkFenceCreateInfo fenceCreateInfo = vkinit::fence_create_info(VK_FENCE_CREATE_SIGNALED_BIT);
     VK_CHECK(vkCreateFence(device, &fenceCreateInfo, nullptr, &immFence));
 
+    VkSemaphoreTypeCreateInfo timelineCreateInfo{};
+    timelineCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+    timelineCreateInfo.pNext = nullptr;
+    timelineCreateInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+    timelineCreateInfo.initialValue = 0;
+
+    VkSemaphoreCreateInfo semaphoreCreateInfo = vkinit::semaphore_create_info();
+    semaphoreCreateInfo.pNext = &timelineCreateInfo;
+
+    VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &_timelineSemaphore));
+
+    semaphoreCreateInfo.pNext = nullptr;
 
     for (int i = 0; i < FRAME_OVERLAP; i++) {
-
-        VK_CHECK(vkCreateFence(device, &fenceCreateInfo, nullptr, &frames[i]._renderFence));
-
-        VkSemaphoreCreateInfo semaphoreCreateInfo = vkinit::semaphore_create_info();
-
         VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frames[i]._swapchainSemaphore));
         VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frames[i]._renderSemaphore));
+
 
     }
 }
@@ -1281,9 +1309,6 @@ void VulkanEngine::init_descriptors()
 
 
     drawImageDescriptors = globalDescriptorAllocator.allocate(device, drawImageDescriptorLayout);
-    globalDescriptor = globalDescriptorAllocator.allocate(device, gpuSceneDataDescriptorLayout);
-    gpuSceneDataBuffer = vkutil::createBuffer(allocator, sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-
     {
         VkDescriptorImageInfo imgInfo{};
         imgInfo.imageView = drawImage.imageView;
@@ -1299,15 +1324,19 @@ void VulkanEngine::init_descriptors()
 
         vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
     }
-    {
+
+    for (int i = 0; i < FRAME_OVERLAP; i++) {
+        frames[i].globalDescriptor = globalDescriptorAllocator.allocate(device, gpuSceneDataDescriptorLayout);
+        frames[i].sceneDataBuffer = vkutil::createBuffer(allocator, sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
         VkDescriptorBufferInfo bufInfo{};
-        bufInfo.buffer = gpuSceneDataBuffer.buffer;
+        bufInfo.buffer = frames[i].sceneDataBuffer.buffer;
         bufInfo.offset = 0;
         bufInfo.range = sizeof(GPUSceneData);
 
         VkWriteDescriptorSet write{};
         write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = globalDescriptor;
+        write.dstSet = frames[i].globalDescriptor;
         write.dstBinding = 0;
         write.descriptorCount = 1;
         write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -1613,14 +1642,18 @@ int VulkanEngine::add_global_texture(VkImageView view, VkSampler sampler)
 
     VkWriteDescriptorSet write{};
     write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet = globalDescriptor;
     write.dstBinding = 1;
     write.dstArrayElement = index;
     write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     write.descriptorCount = 1;
     write.pImageInfo = &imageInfo;
 
-    vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+    VkWriteDescriptorSet writes[FRAME_OVERLAP];
+    for (int i = 0; i < FRAME_OVERLAP; i++) {
+        writes[i] = write;
+        writes[i].dstSet = frames[i].globalDescriptor;
+    }
+    vkUpdateDescriptorSets(device, FRAME_OVERLAP, writes, 0, nullptr);
     return index;
 }
 

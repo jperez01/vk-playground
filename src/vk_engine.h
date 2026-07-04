@@ -67,9 +67,10 @@ struct FrameGarbage {
 
 struct FrameData {
 	VkSemaphore _swapchainSemaphore, _renderSemaphore;
-	VkFence _renderFence;
-
+	uint64_t _frameTimelineValue {0};
     FrameGarbage _garbage;
+    AllocatedBuffer sceneDataBuffer;
+    VkDescriptorSet globalDescriptor;
 
     VkCommandPool _commandPool;
     VkCommandBuffer _mainCommandBuffer;
@@ -165,7 +166,6 @@ public:
 
 	VkDescriptorSet drawImageDescriptors;
 	VkDescriptorSetLayout drawImageDescriptorLayout;
-    VkDescriptorSet globalDescriptor;
     uint32_t globalTextureCount{ 0 };
     int add_global_texture(VkImageView view, VkSampler sampler);
 
@@ -181,10 +181,13 @@ public:
     AllocatedImage depthImage;
 
 	AllocatedImage postProcessingImage;
-	VkPipeline postProcessPipeline;
+	VkPipeline postProcessPipeline {VK_NULL_HANDLE};
 	VkPipelineLayout postProcessPipelineLayout {VK_NULL_HANDLE};
 	VkDescriptorSetLayout postProcessImageLayout {VK_NULL_HANDLE};
 	VkDescriptorSet postProcessDescriptorSet {VK_NULL_HANDLE};
+
+	VkSemaphore _timelineSemaphore {VK_NULL_HANDLE};
+	uint64_t _timelineValue {0};
 
     // immediate submit structures
     VkFence immFence;
@@ -202,7 +205,6 @@ public:
     GPUMeshBuffers rectangle;
     DrawContext drawCommands;
     GPUSceneData sceneData;
-    AllocatedBuffer gpuSceneDataBuffer;
 
     Camera mainCamera;
 

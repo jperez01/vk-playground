@@ -20,6 +20,8 @@ VkSemaphoreCreateInfo semaphore_create_info(VkSemaphoreCreateFlags flags = 0);
 
 VkSubmitInfo2 submit_info(VkCommandBufferSubmitInfo* cmd, VkSemaphoreSubmitInfo* signalSemaphoreInfo,
     VkSemaphoreSubmitInfo* waitSemaphoreInfo);
+VkSubmitInfo2 submit_info(VkCommandBufferSubmitInfo* cmd, uint32_t signalSemaphoreInfoCount, VkSemaphoreSubmitInfo* signalSemaphoreInfo,
+    uint32_t waitSemaphoreInfoCount, VkSemaphoreSubmitInfo* waitSemaphoreInfo);
 VkPresentInfoKHR present_info();
 
 VkRenderingAttachmentInfo attachment_info(VkImageView view, VkClearValue* clear, VkImageLayout layout /*= VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL*/);
