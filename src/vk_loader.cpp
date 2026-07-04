@@ -209,7 +209,7 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
     // temporal arrays for all the objects to use while creating the GLTF data
     std::vector<std::shared_ptr<MeshAsset>> meshes;
     std::vector<std::shared_ptr<Node>> nodes;
-    std::vector<AllocatedImage> images;
+    std::vector<AllocatedImage*> images;
     std::vector<std::shared_ptr<GLTFMaterial>> materials;
 //< load_arrays
 
@@ -218,12 +218,12 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
         std::optional<AllocatedImage> img = load_image(engine, gltf, image, cmd, stagingBuffers);
 
         if (img.has_value()) {
-            images.push_back(*img);
-            file.images[image.name.c_str()] = *img;
+            file.images[image.name.c_str()] = std::move(*img);
+            images.push_back(&file.images[image.name.c_str()]);
         } else {
             // we failed to load, so lets give the slot a default white texture to not
             // completely break loading
-            images.push_back(engine->errorCheckerboardImage);
+            images.push_back(&engine->errorCheckerboardImage);
             std::cout << "gltf failed to load texture " << image.name << std::endl;
         }
     }
@@ -265,7 +265,7 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
             size_t img = gltf.textures[mat.pbrData.baseColorTexture.value().textureIndex].imageIndex.value();
             size_t sampler = gltf.textures[mat.pbrData.baseColorTexture.value().textureIndex].samplerIndex.value();
 
-            constants.colorTexID = engine->add_global_texture(images[img].imageView, file.samplers[sampler]);
+            constants.colorTexID = engine->add_global_texture(images[img]->imageView, file.samplers[sampler]);
         } else {
             constants.colorTexID = engine->add_global_texture(engine->whiteImage.imageView, engine->defaultSamplerLinear);
         }
@@ -274,7 +274,7 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
             size_t img = gltf.textures[mat.pbrData.metallicRoughnessTexture.value().textureIndex].imageIndex.value();
             size_t sampler = gltf.textures[mat.pbrData.metallicRoughnessTexture.value().textureIndex].samplerIndex.value();
 
-            constants.metalRoughTexID = engine->add_global_texture(images[img].imageView, file.samplers[sampler]);
+            constants.metalRoughTexID = engine->add_global_texture(images[img]->imageView, file.samplers[sampler]);
         } else {
             constants.metalRoughTexID = engine->add_global_texture(engine->whiteImage.imageView, engine->defaultSamplerLinear);
         }
@@ -455,9 +455,6 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
     vkQueueSubmit2(engine->graphicsQueue, 1, &submit, engine->immFence);
     vkWaitForFences(engine->device, 1, &engine->immFence, true, 9999999999);
 
-    for (auto& buffer : stagingBuffers) {
-        vkutil::destroyBuffer(engine->allocator, buffer);
-    }
 
     return scene;
 //< load_graph
@@ -473,29 +470,7 @@ void LoadedGLTF::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
 
 void LoadedGLTF::clearAll()
 {
-    VkDevice dv = creator->device;
-
-    for (auto& [k, v] : meshes) {
-        vkutil::destroyBuffer(creator->allocator, v->meshBuffers.indexBuffer);
-        vkutil::destroyBuffer(creator->allocator, v->meshBuffers.vertexBuffer);
-    }
-
-    for (auto& [k, v] : images) {
-
-        if (v.image == creator->errorCheckerboardImage.image) {
-            // dont destroy the default images
-            continue;
-        }
-        vkutil::destroyImage(creator->device, creator->allocator, v);
-    }
-
     for (auto& sampler : samplers) {
-        vkDestroySampler(dv, sampler, nullptr);
+        creator->defer_destroy(sampler);
     }
-
-    auto materialBuffer = materialDataBuffer;
-    auto samplersToDestroy = samplers;
-
-
-    vkutil::destroyBuffer(creator->allocator, materialBuffer);
 }

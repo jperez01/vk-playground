@@ -27,24 +27,6 @@ struct Mesh;
 }
 class Model;
 
-struct DeletionQueue {
-    std::deque<std::function<void()>> deletors;
-
-    void push_function(std::function<void()>&& function)
-    {
-        deletors.push_back(function);
-    }
-
-    void flush()
-    {
-        // reverse iterate the deletion queue to execute all the functions
-        for (auto it = deletors.rbegin(); it != deletors.rend(); it++) {
-            (*it)(); // call functors
-        }
-
-        deletors.clear();
-    }
-};
 
 struct ComputePushConstants {
 	glm::vec4 data1;
@@ -73,11 +55,21 @@ struct RenderObject {
     VkDeviceAddress vertexBufferAddress;
 };
 
+struct FrameGarbage {
+    std::vector<VkBuffer> buffers;
+    std::vector<VmaAllocation> allocations;
+    std::vector<VkImage> images;
+    std::vector<VkImageView> imageViews;
+    std::vector<VkSampler> samplers;
+
+    void flush(VkDevice device, VmaAllocator allocator);
+};
+
 struct FrameData {
 	VkSemaphore _swapchainSemaphore, _renderSemaphore;
 	VkFence _renderFence;
 
-    DeletionQueue _deletionQueue;
+    FrameGarbage _garbage;
 
     VkCommandPool _commandPool;
     VkCommandBuffer _mainCommandBuffer;
@@ -148,6 +140,7 @@ public:
     VkQueue graphicsQueue;
     uint32_t graphicsQueueFamily;
 
+    VkDescriptorPool imguiPool {VK_NULL_HANDLE};
     AllocatedBuffer defaultGLTFMaterialData;
 
     FrameData frames[FRAME_OVERLAP];
@@ -176,7 +169,6 @@ public:
     uint32_t globalTextureCount{ 0 };
     int add_global_texture(VkImageView view, VkSampler sampler);
 
-    DeletionQueue mainDeletionQueue;
 
     VmaAllocator allocator; // vma lib allocator
 
@@ -190,9 +182,9 @@ public:
 
 	AllocatedImage postProcessingImage;
 	VkPipeline postProcessPipeline;
-	VkPipelineLayout postProcessPipelineLayout;
-	VkDescriptorSetLayout postProcessImageLayout;
-	VkDescriptorSet postProcessDescriptorSet;
+	VkPipelineLayout postProcessPipelineLayout {VK_NULL_HANDLE};
+	VkDescriptorSetLayout postProcessImageLayout {VK_NULL_HANDLE};
+	VkDescriptorSet postProcessDescriptorSet {VK_NULL_HANDLE};
 
     // immediate submit structures
     VkFence immFence;
@@ -216,7 +208,7 @@ public:
 
     EngineStats stats;
 
-	std::vector<Model> importedModels;
+	std::vector<std::unique_ptr<Model>> importedModels;
 
 	std::vector<ComputeEffect> backgroundEffects;
 	int currentBackgroundEffect{ 0 };
@@ -257,6 +249,10 @@ public:
 
     AllocatedImage create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
     AllocatedImage create_image(VkCommandBuffer cmd, std::vector<AllocatedBuffer>& stagingBuffers, void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
+
+    void defer_destroy(VkBuffer buffer, VmaAllocation allocation);
+    void defer_destroy(VkImage image, VkImageView view, VmaAllocation allocation);
+    void defer_destroy(VkSampler sampler);
 
     void immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function);
 

@@ -24,19 +24,87 @@
 
 
 
+// forward declarations for RAII cleanup
+namespace vkutil {
+    void defer_destroy_buffer(VkBuffer buffer, VmaAllocation allocation);
+    void defer_destroy_image(VkImage image, VkImageView view, VmaAllocation allocation);
+}
+
 // we will add our main reusable types here
 struct AllocatedImage {
-    VkImage image;
-    VkImageView imageView;
-    VmaAllocation allocation;
-    VkExtent3D imageExtent;
-    VkFormat imageFormat;
+    VkImage image { VK_NULL_HANDLE };
+    VkImageView imageView { VK_NULL_HANDLE };
+    VmaAllocation allocation { VK_NULL_HANDLE };
+    VkExtent3D imageExtent { 0, 0, 0 };
+    VkFormat imageFormat { VK_FORMAT_UNDEFINED };
+
+    AllocatedImage() = default;
+    ~AllocatedImage() {
+        if (image != VK_NULL_HANDLE || imageView != VK_NULL_HANDLE || allocation != VK_NULL_HANDLE) {
+            vkutil::defer_destroy_image(image, imageView, allocation);
+        }
+    }
+
+    AllocatedImage(const AllocatedImage&) = delete;
+    AllocatedImage& operator=(const AllocatedImage&) = delete;
+
+    AllocatedImage(AllocatedImage&& other) noexcept : image(other.image), imageView(other.imageView), allocation(other.allocation), imageExtent(other.imageExtent), imageFormat(other.imageFormat) {
+        other.image = VK_NULL_HANDLE;
+        other.imageView = VK_NULL_HANDLE;
+        other.allocation = VK_NULL_HANDLE;
+    }
+    AllocatedImage& operator=(AllocatedImage&& other) noexcept {
+        if (this != &other) {
+            if (image != VK_NULL_HANDLE || imageView != VK_NULL_HANDLE || allocation != VK_NULL_HANDLE) {
+                vkutil::defer_destroy_image(image, imageView, allocation);
+            }
+            image = other.image;
+            imageView = other.imageView;
+            allocation = other.allocation;
+            imageExtent = other.imageExtent;
+            imageFormat = other.imageFormat;
+            
+            other.image = VK_NULL_HANDLE;
+            other.imageView = VK_NULL_HANDLE;
+            other.allocation = VK_NULL_HANDLE;
+        }
+        return *this;
+    }
 };
 
 struct AllocatedBuffer {
-    VkBuffer buffer;
-    VmaAllocation allocation;
-    VmaAllocationInfo info;
+    VkBuffer buffer { VK_NULL_HANDLE };
+    VmaAllocation allocation { VK_NULL_HANDLE };
+    VmaAllocationInfo info {};
+
+    AllocatedBuffer() = default;
+    ~AllocatedBuffer() {
+        if (buffer != VK_NULL_HANDLE || allocation != VK_NULL_HANDLE) {
+            vkutil::defer_destroy_buffer(buffer, allocation);
+        }
+    }
+
+    AllocatedBuffer(const AllocatedBuffer&) = delete;
+    AllocatedBuffer& operator=(const AllocatedBuffer&) = delete;
+
+    AllocatedBuffer(AllocatedBuffer&& other) noexcept : buffer(other.buffer), allocation(other.allocation), info(other.info) {
+        other.buffer = VK_NULL_HANDLE;
+        other.allocation = VK_NULL_HANDLE;
+    }
+    AllocatedBuffer& operator=(AllocatedBuffer&& other) noexcept {
+        if (this != &other) {
+            if (buffer != VK_NULL_HANDLE || allocation != VK_NULL_HANDLE) {
+                vkutil::defer_destroy_buffer(buffer, allocation);
+            }
+            buffer = other.buffer;
+            allocation = other.allocation;
+            info = other.info;
+            
+            other.buffer = VK_NULL_HANDLE;
+            other.allocation = VK_NULL_HANDLE;
+        }
+        return *this;
+    }
 };
 
 struct GPUGLTFMaterial {
