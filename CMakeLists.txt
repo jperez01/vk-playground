@@ -17,6 +17,7 @@ add_subdirectory(shared)
 add_subdirectory(src)
 find_program(SLANGC slangc)
 
+file(MAKE_DIRECTORY "${PROJECT_SOURCE_DIR}/spirv")
 file(GLOB_RECURSE SLANG_SOURCE_FILES
     "${PROJECT_SOURCE_DIR}/shaders/*.slang"
     )
