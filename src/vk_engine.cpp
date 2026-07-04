@@ -665,6 +665,13 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
     stats.drawcall_count = 0;
     stats.triangle_count = 0;
 
+    // Dynamic state: opaque pass — back-face cull, depth test+write on
+    vkCmdSetCullMode(cmd, VK_CULL_MODE_BACK_BIT);
+    vkCmdSetFrontFace(cmd, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    vkCmdSetDepthTestEnable(cmd, VK_TRUE);
+    vkCmdSetDepthWriteEnable(cmd, VK_TRUE);
+    vkCmdSetDepthCompareOp(cmd, VK_COMPARE_OP_GREATER_OR_EQUAL);
+
     for (auto& r : opaque_draws) {
         draw(drawCommands.OpaqueSurfaces[r]);
     }
@@ -688,6 +695,12 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
 		}
 	}
 
+    // Dynamic state: transparent pass — no cull, depth test on but writes off
+    vkCmdSetCullMode(cmd, VK_CULL_MODE_NONE);
+    vkCmdSetFrontFace(cmd, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    vkCmdSetDepthTestEnable(cmd, VK_TRUE);
+    vkCmdSetDepthWriteEnable(cmd, VK_FALSE);
+    vkCmdSetDepthCompareOp(cmd, VK_COMPARE_OP_GREATER_OR_EQUAL);
     for (auto& r : drawCommands.TransparentSurfaces) {
         draw(r);
     }
@@ -1388,13 +1401,12 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine* engine)
 
 	pipelineBuilder.set_polygon_mode(VK_POLYGON_MODE_FILL);
 
-	pipelineBuilder.set_cull_mode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+	// NOTE: cull mode, front face, depth test/write/compare are now dynamic state
+	// and will be set per-pass in draw_geometry() via vkCmdSet* calls.
 
 	pipelineBuilder.set_multisampling_none();
 
 	pipelineBuilder.disable_blending();
-
-	pipelineBuilder.enable_depthtest(true, VK_COMPARE_OP_GREATER_OR_EQUAL);
 
 	//render format
 	pipelineBuilder.set_color_attachment_format(engine->drawImage.imageFormat);
@@ -1406,10 +1418,8 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine* engine)
 	// finally build the pipeline
     opaquePipeline.pipeline = pipelineBuilder.build_pipeline(engine->device);
 
-	// create the transparent variant
+	// create the transparent variant (only blending differs; depth/cull are dynamic)
 	pipelineBuilder.enable_blending_additive();
-
-	pipelineBuilder.enable_depthtest(false, VK_COMPARE_OP_GREATER_OR_EQUAL);
 
 	transparentPipeline.pipeline = pipelineBuilder.build_pipeline(engine->device);
 
