@@ -256,6 +256,8 @@ public:
     void defer_destroy(VkImage image, VkImageView view, VmaAllocation allocation);
     void defer_destroy(VkSampler sampler);
 
+    PFN_vkCmdPushDescriptorSetKHR vkCmdPushDescriptorSetKHR;
+
     void immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function);
 
     std::unordered_map<std::string, std::shared_ptr<LoadedGLTF>> loadedScenes;

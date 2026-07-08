@@ -450,8 +450,42 @@ void VulkanEngine::draw()
 
 	draw_main(cmd);
 
-	//transition the draw image and the swapchain image into their correct transfer layouts
-	vkutil::transition_image_for_transfer_src(cmd, drawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	//transition the draw image and post processing image to GENERAL for compute
+	vkutil::transition_image(cmd, drawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+		VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+		VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
+		
+	vkutil::transition_image(cmd, postProcessingImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+		VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
+		VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT);
+
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, postProcessPipeline);
+
+	VkDescriptorImageInfo drawInfo{ .sampler = VK_NULL_HANDLE, .imageView = drawImage.imageView, .imageLayout = VK_IMAGE_LAYOUT_GENERAL };
+	VkDescriptorImageInfo postInfo{ .sampler = VK_NULL_HANDLE, .imageView = postProcessingImage.imageView, .imageLayout = VK_IMAGE_LAYOUT_GENERAL };
+
+	VkWriteDescriptorSet writes[2] = {};
+	writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	writes[0].dstBinding = 0;
+	writes[0].descriptorCount = 1;
+	writes[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+	writes[0].pImageInfo = &drawInfo;
+
+	writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	writes[1].dstBinding = 1;
+	writes[1].descriptorCount = 1;
+	writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	writes[1].pImageInfo = &postInfo;
+
+	vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, postProcessPipelineLayout, 0, 2, writes);
+
+	vkCmdDispatch(cmd, (uint32_t)std::ceil(drawExtent.width / 16.0), (uint32_t)std::ceil(drawExtent.height / 16.0), 1);
+
+	//transition the post processing image and the swapchain image into their correct transfer layouts
+	vkutil::transition_image(cmd, postProcessingImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
+		VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+
 	VkImageLayout swapchainOldLayout = swapchainImageInitialized[swapchainImageIndex]
 		? VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
 		: VK_IMAGE_LAYOUT_UNDEFINED;
@@ -470,8 +504,8 @@ void VulkanEngine::draw()
 	extent.width = windowExtent.width;
 	//< draw_first
 	//> imgui_draw
-	// execute a copy from the draw image into the swapchain
-    vkutil::copy_image_to_image(cmd, drawImage.image, swapchainImages[swapchainImageIndex], drawExtent,swapchainExtent);
+	// execute a copy from the post processing image into the swapchain
+    vkutil::copy_image_to_image(cmd, postProcessingImage.image, swapchainImages[swapchainImageIndex], drawExtent,swapchainExtent);
 
 	// set swapchain image layout to Attachment Optimal so we can draw it
 	vkutil::transition_image(
@@ -980,6 +1014,8 @@ void VulkanEngine::init_vulkan()
    features12.bufferDeviceAddress = true;
    features12.descriptorIndexing = true;
    features12.descriptorBindingPartiallyBound = true;
+   features12.runtimeDescriptorArray = true;
+   features12.timelineSemaphore = true;
    features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
 
    VkPhysicalDeviceVulkan11Features features11 {};
@@ -989,19 +1025,26 @@ void VulkanEngine::init_vulkan()
     // use vkbootstrap to select a gpu.
     // We want a gpu that can write to the SDL surface and supports vulkan 1.2
     vkb::PhysicalDeviceSelector selector { vkb_inst };
-    vkb::PhysicalDevice physicalDevice = selector.set_minimum_version(1, 3).set_required_features_13(features13).set_required_features_12(features12).set_required_features_11(features11).set_surface(surface).select().value();
+    vkb::PhysicalDevice physicalDevice = selector.set_minimum_version(1, 3)
+        .set_required_features_13(features13)
+        .set_required_features_12(features12)
+        .set_required_features_11(features11)
+        .set_surface(surface)
+        .add_required_extension(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME)
+        .select()
+        .value();
 
 
     // physicalDevice.features.
     // create the final vulkan device
 
     vkb::DeviceBuilder deviceBuilder { physicalDevice };
-
     vkb::Device vkbDevice = deviceBuilder.build().value();
-
     // Get the VkDevice handle used in the rest of a vulkan application
     device = vkbDevice.device;
     chosenGPU = physicalDevice.physical_device;
+    
+    vkCmdPushDescriptorSetKHR = (PFN_vkCmdPushDescriptorSetKHR)vkGetDeviceProcAddr(device, "vkCmdPushDescriptorSetKHR");
 
     // use vkbootstrap to get a Graphics queue
     graphicsQueue = vkbDevice.get_queue(vkb::QueueType::graphics).value();
@@ -1254,6 +1297,7 @@ void VulkanEngine::init_imgui()
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+	io.ConfigFlags ^= ImGuiConfigFlags_IsSRGB;
 
 	// this initializes imgui for SDL
 	ImGui_ImplSDL2_InitForVulkan(window);
@@ -1286,6 +1330,7 @@ void VulkanEngine::init_pipelines()
 {
     // COMPUTE PIPELINES
     init_background_pipelines();
+    init_post_process_pipeline();
 
     metalRoughMaterial.build_pipelines(this);
 }
@@ -1297,7 +1342,7 @@ void VulkanEngine::init_descriptors()
         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 3 },
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3 },
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 10 },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 30 },
     };
 
     globalDescriptorAllocator.init_pool(device, 100, sizes);
@@ -1428,43 +1473,33 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine* engine)
 }
 
 void VulkanEngine::init_post_process_pipeline() {
-	DescriptorLayoutBuilder layoutBuilder;
-	layoutBuilder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+	VkDescriptorSetLayoutBinding drawBind{};
+	drawBind.binding = 0;
+	drawBind.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+	drawBind.descriptorCount = 1;
+	drawBind.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
-	postProcessImageLayout = layoutBuilder.build(device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+	VkDescriptorSetLayoutBinding postBind{};
+	postBind.binding = 1;
+	postBind.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	postBind.descriptorCount = 1;
+	postBind.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
-	postProcessDescriptorSet = globalDescriptorAllocator.allocate(device, postProcessImageLayout);
-	{
-		VkDescriptorImageInfo imgInfo{};
-		imgInfo.imageView = drawImage.imageView;
-		imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		imgInfo.sampler = defaultSamplerLinear;
+	VkDescriptorSetLayoutBinding bindings[] = { drawBind, postBind };
 
-		VkWriteDescriptorSet write{};
-		write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		write.dstSet = postProcessDescriptorSet;
-		write.dstBinding = 1;
-		write.descriptorCount = 1;
-		write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		write.pImageInfo = &imgInfo;
+	VkDescriptorSetLayoutCreateInfo layoutInfo{};
+	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layoutInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR; 
+	layoutInfo.bindingCount = 2;
+	layoutInfo.pBindings = bindings;
 
-		vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
-	}
-	VkPushConstantRange matrixRange{};
-	matrixRange.offset = 0;
-	matrixRange.size = sizeof(GPUDrawPushConstants);
-	matrixRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	VK_CHECK(vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &postProcessImageLayout));
 
-	VkDescriptorSetLayout layouts[] = { postProcessImageLayout };
+	VkPipelineLayoutCreateInfo pipelineLayoutInfo = vkinit::pipeline_layout_create_info();
+	pipelineLayoutInfo.setLayoutCount = 1;
+	pipelineLayoutInfo.pSetLayouts = &postProcessImageLayout;
 
-	VkPipelineLayoutCreateInfo quadMeshLayoutInfo = vkinit::pipeline_layout_create_info();
-	quadMeshLayoutInfo.setLayoutCount = 1;
-	quadMeshLayoutInfo.pSetLayouts = layouts;
-	quadMeshLayoutInfo.pPushConstantRanges = &matrixRange;
-	quadMeshLayoutInfo.pushConstantRangeCount = 1;
-
-	VkPipelineLayout newLayout;
-	VK_CHECK(vkCreatePipelineLayout(device, &quadMeshLayoutInfo, nullptr, &newLayout));
+	VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &postProcessPipelineLayout));
 
 	//depth image size will match the window
 	VkExtent3D postProcessImageExtent = {
@@ -1495,34 +1530,27 @@ void VulkanEngine::init_post_process_pipeline() {
 	VkImageViewCreateInfo rview_info = vkinit::imageview_create_info(postProcessingImage.imageFormat, postProcessingImage.image, VK_IMAGE_ASPECT_COLOR_BIT);
 	VK_CHECK(vkCreateImageView(device, &rview_info, nullptr, &postProcessingImage.imageView));
 
-
-	VkShaderModule postProcessVertexShader;
-	if (!vkutil::load_shader_module("screen_texture.vert", device, &postProcessVertexShader)) {
-		fmt::print("Error when loading the postprocess vertex shader module");
-	}
-	VkShaderModule postProcessFragmentShader;
-	if (!vkutil::load_shader_module("screen_texture.frag", device, &postProcessFragmentShader)) {
-		fmt::print("Error when loading the postprocess fragment shader module");
+	VkShaderModule computeShader;
+	if (!vkutil::load_shader_module("post_process_comp", device, &computeShader)) {
+		fmt::print("Error when loading the post_process compute shader module");
 	}
 
-	PipelineBuilder pipelineBuilder;
-	pipelineBuilder.set_shaders(postProcessVertexShader, postProcessFragmentShader);
+	VkPipelineShaderStageCreateInfo stageinfo{};
+	stageinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stageinfo.pNext = nullptr;
+	stageinfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	stageinfo.module = computeShader;
+	stageinfo.pName = "main";
 
-	pipelineBuilder.set_input_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-	pipelineBuilder.set_polygon_mode(VK_POLYGON_MODE_FILL);
-	pipelineBuilder.set_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE);
-	pipelineBuilder.disable_blending();
-	pipelineBuilder.set_multisampling_none();
-	pipelineBuilder.enable_depthtest(true, VK_COMPARE_OP_GREATER_OR_EQUAL);
+	VkComputePipelineCreateInfo computePipelineCreateInfo{};
+	computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	computePipelineCreateInfo.pNext = nullptr;
+	computePipelineCreateInfo.layout = postProcessPipelineLayout;
+	computePipelineCreateInfo.stage = stageinfo;
 
-	pipelineBuilder.set_color_attachment_format(postProcessingImage.imageFormat);
-	pipelineBuilder.pipelineLayout = newLayout;
+	VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &postProcessPipeline));
 
-	postProcessPipeline = pipelineBuilder.build_pipeline(device);
-	postProcessPipelineLayout = newLayout;
-
-	vkDestroyShaderModule(device, postProcessVertexShader, nullptr);
-	vkDestroyShaderModule(device, postProcessFragmentShader, nullptr);
+	vkDestroyShaderModule(device, computeShader, nullptr);
 }
 
 void VulkanEngine::sendModelDataToGpu(Model& model) {
