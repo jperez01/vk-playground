@@ -12,8 +12,10 @@ add_library (vkguide_shared STATIC
   vk_pipelines.cpp
   camera.cpp
   camera.h
-  meshes.h
-  meshes.cpp
+  vk_resources.h
+  vk_resources.cpp
+  vk_deletion_queue.h
+  vk_deletion_queue.cpp
 )
 
 set_property(TARGET vkguide_shared PROPERTY CXX_STANDARD 20)

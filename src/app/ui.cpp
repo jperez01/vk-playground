@@ -6,6 +6,7 @@
 
 #include "imgui.h"
 #include "vk_engine.h"
+#include "vk_loader.h"
 #include "nfd.h"
 #include "fmt/std.h"
 

@@ -37,4 +37,7 @@ public:
 
 namespace vkutil {
 bool loadShaderModule(const char* filePath, VkDevice device, VkShaderModule* outShaderModule);
+
+// Loads `shaderName` from the SPIR-V directory and builds a compute pipeline with entry point "main". Aborts if the shader can't be loaded.
+VkPipeline createComputePipeline(VkDevice device, const char* shaderName, VkPipelineLayout layout);
 }

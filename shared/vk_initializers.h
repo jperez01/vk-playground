@@ -32,15 +32,6 @@ VkRenderingInfo renderingInfo(VkExtent2D renderExtent, VkRenderingAttachmentInfo
 VkImageSubresourceRange imageSubresourceRange(VkImageAspectFlags aspectMask);
 
 VkSemaphoreSubmitInfo semaphoreSubmitInfo(VkPipelineStageFlags2 stageMask, VkSemaphore semaphore);
-VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(VkDescriptorType type, VkShaderStageFlags stageFlags,
-    uint32_t binding);
-VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo(VkDescriptorSetLayoutBinding* bindings,
-    uint32_t bindingCount);
-VkWriteDescriptorSet writeDescriptorImage(VkDescriptorType type, VkDescriptorSet dstSet,
-    VkDescriptorImageInfo* imageInfo, uint32_t binding);
-VkWriteDescriptorSet writeDescriptorBuffer(VkDescriptorType type, VkDescriptorSet dstSet,
-    VkDescriptorBufferInfo* bufferInfo, uint32_t binding);
-VkDescriptorBufferInfo bufferInfo(VkBuffer buffer, VkDeviceSize offset, VkDeviceSize range);
 
 VkImageCreateInfo imageCreateInfo(VkFormat format, VkImageUsageFlags usageFlags, VkExtent3D extent);
 VkImageViewCreateInfo imageViewCreateInfo(VkFormat format, VkImage image, VkImageAspectFlags aspectFlags);

@@ -54,8 +54,7 @@ void Application::run() {
         if (freezeRendering) continue;
 
     	mainCamera.update();
-    	engine.updateScene(mainCamera.getViewMatrix());
-    	engine.run();
+    	engine.run(mainCamera.getViewMatrix());
     }
 }
 

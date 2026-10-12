@@ -1,14 +1,7 @@
-// Core GPU resource types (RAII buffers/images), vertex/material layouts and the scene node.
+// Core GPU resource types (RAII buffers/images), GPU structs, vertex/material layouts and mesh buffers.
 #pragma once
 
-#include <memory>
-#include <optional>
-#include <string>
-#include <vector>
-#include <span>
-#include <array>
-#include <functional>
-#include <deque>
+#include <cstdint>
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_enum_string_helper.h>
@@ -21,7 +14,7 @@
 
 
 
-// forward declarations for RAII cleanup
+// forward declarations for RAII cleanup (defined in vk_deletion_queue.cpp)
 namespace vkutil {
     void deferDestroyBuffer(VkBuffer buffer, VmaAllocation allocation);
     void deferDestroyImage(VkImage image, VkImageView view, VmaAllocation allocation);
@@ -158,43 +151,6 @@ struct GPUDrawPushConstants {
     glm::mat4 worldMatrix;
     VkDeviceAddress vertexBuffer;
     VkDeviceAddress materialBuffer;
-};
-
-struct DrawContext;
-
-// base class for a renderable dynamic object
-class IRenderable {
-
-    virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx) = 0;
-};
-
-// implementation of a drawable scene node.
-// the scene node can hold children and will also keep a transform to propagate
-// to them
-struct Node : public IRenderable {
-
-    // parent pointer must be a weak pointer to avoid circular dependencies
-    std::weak_ptr<Node> parent;
-    std::vector<std::shared_ptr<Node>> children;
-
-    glm::mat4 localTransform;
-    glm::mat4 worldTransform;
-
-    void refreshTransform(const glm::mat4& parentMatrix)
-    {
-        worldTransform = parentMatrix * localTransform;
-        for (auto c : children) {
-            c->refreshTransform(worldTransform);
-        }
-    }
-
-    virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx)
-    {
-        // draw children
-        for (auto& c : children) {
-            c->Draw(topMatrix, ctx);
-        }
-    }
 };
 
 #define VK_CHECK(x)                                                     \
