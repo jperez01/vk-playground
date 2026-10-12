@@ -191,13 +191,15 @@ std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::
         sampl.maxLod = VK_LOD_CLAMP_NONE;
         sampl.minLod = 0;
 
-        sampl.magFilter = extractFilter(sampler.magFilter.value_or(fastgltf::Filter::Nearest));
-        sampl.minFilter = extractFilter(sampler.minFilter.value_or(fastgltf::Filter::Nearest));
+        sampl.magFilter = extractFilter(sampler.magFilter.value_or(fastgltf::Filter::Linear));
+        sampl.minFilter = extractFilter(sampler.minFilter.value_or(fastgltf::Filter::LinearMipMapLinear));
 
-        sampl.mipmapMode= extractMipmapMode(sampler.minFilter.value_or(fastgltf::Filter::Nearest));
+        sampl.mipmapMode= extractMipmapMode(sampler.minFilter.value_or(fastgltf::Filter::LinearMipMapLinear));
+
+        vkutil::applyAnisotropy(sampl, engine->maxSamplerAnisotropy);
 
         VkSampler newSampler;
-        vkCreateSampler(engine->device, &sampl, nullptr, &newSampler);
+        VK_CHECK(vkCreateSampler(engine->device, &sampl, nullptr, &newSampler));
 
         file.samplers.push_back(newSampler);
     }

@@ -10,4 +10,7 @@ namespace vkutil {
 
     AllocatedBuffer createBuffer(VmaAllocator allocator, size_t allocSize, VkBufferUsageFlags usage, VmaAllocationCreateFlags allocFlags = 0);
     AllocatedImage createImage(VkDevice device, VmaAllocator allocator, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool hasMipMaps);
+
+    // Enables anisotropic filtering on a linear-filtered sampler when maxAnisotropy > 1.
+    void applyAnisotropy(VkSamplerCreateInfo& info, float maxAnisotropy);
 }

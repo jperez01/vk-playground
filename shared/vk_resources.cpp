@@ -56,3 +56,10 @@ AllocatedImage vkutil::createImage(VkDevice device, VmaAllocator allocator, VkEx
 
     return image;
 }
+
+void vkutil::applyAnisotropy(VkSamplerCreateInfo& info, float maxAnisotropy) {
+    if (maxAnisotropy > 1.f && info.minFilter == VK_FILTER_LINEAR) {
+        info.anisotropyEnable = VK_TRUE;
+        info.maxAnisotropy = maxAnisotropy;
+    }
+}

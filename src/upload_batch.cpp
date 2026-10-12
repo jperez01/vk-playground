@@ -112,7 +112,7 @@ void UploadBatch::submitAndWait()
     VkSubmitInfo2 submit = vkinit::submitInfo(&cmdinfo, nullptr, nullptr);
 
     VK_CHECK(vkQueueSubmit2(context.queue, 1, &submit, context.fence));
-    VK_CHECK(vkWaitForFences(context.device, 1, &context.fence, true, 9999999999));
+    VK_CHECK(vkWaitForFences(context.device, 1, &context.fence, true, UINT64_MAX));
 
     submitted = true;
     context.batchOpen = false;

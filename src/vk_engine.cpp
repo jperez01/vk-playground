@@ -93,12 +93,16 @@ void VulkanEngine::initDefaultData() {
 
 	sampl.magFilter = VK_FILTER_NEAREST;
 	sampl.minFilter = VK_FILTER_NEAREST;
+	sampl.minLod = 0.f;
+	sampl.maxLod = VK_LOD_CLAMP_NONE;
 
-	vkCreateSampler(device, &sampl, nullptr, &defaultSamplerNearest);
+	VK_CHECK(vkCreateSampler(device, &sampl, nullptr, &defaultSamplerNearest));
 
 	sampl.magFilter = VK_FILTER_LINEAR;
 	sampl.minFilter = VK_FILTER_LINEAR;
-	vkCreateSampler(device, &sampl, nullptr, &defaultSamplerLinear);
+	sampl.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+	vkutil::applyAnisotropy(sampl, maxSamplerAnisotropy);
+	VK_CHECK(vkCreateSampler(device, &sampl, nullptr, &defaultSamplerLinear));
 }
 
 void VulkanEngine::cleanup()
@@ -231,7 +235,7 @@ bool VulkanEngine::beginFrame(uint32_t& swapchainImageIndex)
 		waitInfo.pSemaphores = &timelineSemaphore;
 		waitInfo.pValues = &waitValue;
 
-		VK_CHECK(vkWaitSemaphores(device, &waitInfo, 1000000000));
+		VK_CHECK(vkWaitSemaphores(device, &waitInfo, UINT64_MAX));
 	}
 
 	const uint32_t slot = getCurrentFrameSlot();
@@ -241,7 +245,7 @@ bool VulkanEngine::beginFrame(uint32_t& swapchainImageIndex)
 	VK_CHECK(vkGetSemaphoreCounterValue(device, timelineSemaphore, &completedValue));
 	deletionQueue.collect(device, allocator, completedValue);
 
-	VkResult e = vkAcquireNextImageKHR(device, swapchain, 1000000000, getCurrentFrame().swapchainSemaphore, nullptr, &swapchainImageIndex);
+	VkResult e = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, getCurrentFrame().swapchainSemaphore, nullptr, &swapchainImageIndex);
 	if (e == VK_ERROR_OUT_OF_DATE_KHR) {
 		resizeRequested = true;
 		return false;
@@ -501,57 +505,67 @@ void VulkanEngine::draw()
 	submitAndPresent(cmd, swapchainImageIndex);
 }
 
-bool isVisible(const RenderObject& obj, const glm::mat4& viewproj) {
-    std::array<glm::vec3, 8> corners {
-        glm::vec3 { 1, 1, 1 },
-        glm::vec3 { 1, 1, -1 },
-        glm::vec3 { 1, -1, 1 },
-        glm::vec3 { 1, -1, -1 },
-        glm::vec3 { -1, 1, 1 },
-        glm::vec3 { -1, 1, -1 },
-        glm::vec3 { -1, -1, 1 },
-        glm::vec3 { -1, -1, -1 },
-    };
+struct Frustum {
+    glm::vec4 planes[6];
+};
 
-    glm::mat4 matrix = viewproj * obj.transform;
+// Gribb-Hartmann plane extraction; planes point inward and are normalized.
+Frustum extractFrustum(const glm::mat4& m) {
+    auto row = [&](int i) { return glm::vec4(m[0][i], m[1][i], m[2][i], m[3][i]); };
 
-    glm::vec3 min = { 1.5, 1.5, 1.5 };
-    glm::vec3 max = { -1.5, -1.5, -1.5 };
+    Frustum frustum;
+    frustum.planes[0] = row(3) + row(0);
+    frustum.planes[1] = row(3) - row(0);
+    frustum.planes[2] = row(3) + row(1);
+    frustum.planes[3] = row(3) - row(1);
+    frustum.planes[4] = row(2);
+    frustum.planes[5] = row(3) - row(2);
 
-    for (int c = 0; c < 8; c++) {
-        // project each corner into clip space
-        glm::vec4 v = matrix * glm::vec4(obj.bounds.origin + (corners[c] * obj.bounds.extents), 1.f);
-
-        // perspective correction
-        v.x = v.x / v.w;
-        v.y = v.y / v.w;
-        v.z = v.z / v.w;
-
-        min = glm::min(glm::vec3 { v.x, v.y, v.z }, min);
-        max = glm::max(glm::vec3 { v.x, v.y, v.z }, max);
+    for (glm::vec4& plane : frustum.planes) {
+        plane /= glm::length(glm::vec3(plane));
     }
+    return frustum;
+}
 
-    // check the clip space box is within the view
-    if (min.z > 1.f || max.z < 0.f || min.x > 1.f || max.x < -1.f || min.y > 1.f || max.y < -1.f) {
-        return false;
-    } else {
-        return true;
+bool isVisible(const RenderObject& obj, const Frustum& frustum) {
+    const glm::vec3 center = glm::vec3(obj.transform * glm::vec4(obj.bounds.origin, 1.f));
+    const float maxScale = std::max({ glm::length(glm::vec3(obj.transform[0])),
+        glm::length(glm::vec3(obj.transform[1])),
+        glm::length(glm::vec3(obj.transform[2])) });
+    const float radius = obj.bounds.sphereRadius * maxScale;
+
+    for (const glm::vec4& plane : frustum.planes) {
+        if (glm::dot(glm::vec3(plane), center) + plane.w < -radius) {
+            return false;
+        }
     }
+    return true;
 }
 
 void VulkanEngine::drawGeometry(VkCommandBuffer cmd)
 {
-    std::vector<uint32_t> opaque_draws;
-    opaque_draws.reserve(drawCommands.OpaqueSurfaces.size());
+    const Frustum frustum = extractFrustum(sceneData.viewproj);
+    const glm::vec3 cameraPos = glm::vec3(glm::inverse(sceneData.view)[3]);
 
-    for (int i = 0; i < drawCommands.OpaqueSurfaces.size(); i++) {
-       if (isVisible(drawCommands.OpaqueSurfaces[i], sceneData.viewproj)) {
-            opaque_draws.push_back(i);
-       }
+    opaqueDrawIndices.clear();
+    for (uint32_t i = 0; i < drawCommands.OpaqueSurfaces.size(); i++) {
+        if (isVisible(drawCommands.OpaqueSurfaces[i], frustum)) {
+            opaqueDrawIndices.push_back(i);
+        }
+    }
+
+    transparentDraws.clear();
+    for (uint32_t i = 0; i < drawCommands.TransparentSurfaces.size(); i++) {
+        const RenderObject& obj = drawCommands.TransparentSurfaces[i];
+        if (isVisible(obj, frustum)) {
+            const glm::vec3 center = glm::vec3(obj.transform * glm::vec4(obj.bounds.origin, 1.f));
+            const glm::vec3 delta = center - cameraPos;
+            transparentDraws.emplace_back(glm::dot(delta, delta), i);
+        }
     }
 
     // sort the opaque surfaces by material and mesh
-    std::sort(opaque_draws.begin(), opaque_draws.end(), [&](const auto& iA, const auto& iB) {
+    std::sort(opaqueDrawIndices.begin(), opaqueDrawIndices.end(), [&](const auto& iA, const auto& iB) {
 		const RenderObject& A = drawCommands.OpaqueSurfaces[iA];
 		const RenderObject& B = drawCommands.OpaqueSurfaces[iB];
         if (A.material == B.material) {
@@ -629,7 +643,7 @@ void VulkanEngine::drawGeometry(VkCommandBuffer cmd)
     vkCmdSetDepthWriteEnable(cmd, VK_TRUE);
     vkCmdSetDepthCompareOp(cmd, VK_COMPARE_OP_GREATER_OR_EQUAL);
 
-    for (auto& r : opaque_draws) {
+    for (auto& r : opaqueDrawIndices) {
         draw(drawCommands.OpaqueSurfaces[r]);
     }
 
@@ -639,8 +653,11 @@ void VulkanEngine::drawGeometry(VkCommandBuffer cmd)
     vkCmdSetDepthTestEnable(cmd, VK_TRUE);
     vkCmdSetDepthWriteEnable(cmd, VK_FALSE);
     vkCmdSetDepthCompareOp(cmd, VK_COMPARE_OP_GREATER_OR_EQUAL);
-    for (auto& r : drawCommands.TransparentSurfaces) {
-        draw(r);
+    std::sort(transparentDraws.begin(), transparentDraws.end(), [](const auto& a, const auto& b) {
+        return a.first > b.first;
+    });
+    for (auto& [distance, index] : transparentDraws) {
+        draw(drawCommands.TransparentSurfaces[index]);
     }
 
     // we delete the draw commands now that we processed them
@@ -752,7 +769,11 @@ void VulkanEngine::initVulkan()
         .value();
 
 
-    // physicalDevice.features.
+    VkPhysicalDeviceFeatures features {};
+    features.samplerAnisotropy = VK_TRUE;
+    bool anisotropySupported = physicalDevice.enable_features_if_present(features);
+    maxSamplerAnisotropy = anisotropySupported ? std::min(16.f, physicalDevice.properties.limits.maxSamplerAnisotropy) : 0.f;
+
     // create the final vulkan device
 
     vkb::DeviceBuilder deviceBuilder { physicalDevice };
@@ -885,7 +906,7 @@ void VulkanEngine::resizeSwapchain()
         waitInfo.pSemaphores = &timelineSemaphore;
         waitInfo.pValues = &timelineValue;
 
-        VK_CHECK(vkWaitSemaphores(device, &waitInfo, 1000000000));
+        VK_CHECK(vkWaitSemaphores(device, &waitInfo, UINT64_MAX));
     }
 
 	int w, h;
