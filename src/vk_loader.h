@@ -35,7 +35,7 @@ struct MeshAsset {
     std::shared_ptr<GPUMeshBuffers> meshBuffers;
 };
 
-struct LoadedGLTF : public IRenderable {
+struct LoadedScene : public IRenderable {
 
     // storage for all the data on a given gltf file
     std::unordered_map<std::string, std::shared_ptr<MeshAsset>> meshes;
@@ -53,7 +53,7 @@ struct LoadedGLTF : public IRenderable {
 
     VulkanEngine* creator;
 
-    ~LoadedGLTF() { clearAll(); };
+    ~LoadedScene() { clearAll(); };
 
     virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx);
 
@@ -62,4 +62,7 @@ private:
     void clearAll();
 };
 
-std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::string_view filePath);
+std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::string_view filePath);
+
+// Imports a model with Assimp (OBJ, FBX, ...) and uploads it as a LoadedScene.
+std::optional<std::shared_ptr<LoadedScene>> loadModel(VulkanEngine* engine, const std::string& filePath);

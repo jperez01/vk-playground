@@ -17,13 +17,10 @@
  
 #include <camera.h>
 #include "gpu_profiler.h"
+#include "upload_batch.h"
 #include <vk_descriptors.h>
 #include <vk_loader.h>
 #include <vk_pipelines.h>
-
-#include "model/model.h"
-
-class Model;
 
 struct ComputePushConstants {
 	glm::vec4 data1;
@@ -123,8 +120,6 @@ public:
     uint32_t graphicsQueueFamily;
 
     VkDescriptorPool imguiPool {VK_NULL_HANDLE};
-    AllocatedBuffer defaultGLTFMaterialData;
-    VkDeviceAddress defaultMaterialAddress {0};
 
     FrameData frames[FRAME_OVERLAP];
 
@@ -169,10 +164,7 @@ public:
 	VkSemaphore timelineSemaphore {VK_NULL_HANDLE};
 	uint64_t timelineValue {0};
 
-    // immediate submit structures
-    VkFence immFence;
-    VkCommandBuffer immCommandBuffer;
-    VkCommandPool immCommandPool;
+    UploadContext uploadContext;
 
 	AllocatedImage whiteImage;
 	AllocatedImage blackImage;
@@ -189,8 +181,6 @@ public:
 
     EngineStats stats;
     GpuProfiler gpuProfiler;
-
-	std::vector<std::unique_ptr<Model>> importedModels;
 
 	std::vector<ComputeEffect> backgroundEffects;
 	int currentBackgroundEffect{ 0 };
@@ -209,28 +199,18 @@ public:
 
     // draw loop
     void draw();
-	void drawMain(VkCommandBuffer cmd);
-	void drawImGui(VkCommandBuffer cmd, VkImageView targetImageView);
 
 	void renderNodes();
 
     void drawGeometry(VkCommandBuffer cmd);
 
     void updateScene(const glm::mat4& viewMatrix);
-	void sendModelDataToGpu(Model& model);
 
-    // upload a mesh into a pair of gpu buffers. If descriptor allocator is not
-    // null, it will also create a descriptor that points to the vertex buffer
-	GPUMeshBuffers uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
-	GPUMeshBuffers uploadMesh(VkCommandBuffer cmd, std::vector<AllocatedBuffer>& stagingBuffers, std::span<uint32_t> indices, std::span<Vertex> vertices);
 	void handleImGui();
 	void resizeSwapchain();
 
     FrameData& getCurrentFrame();
     uint32_t getCurrentFrameSlot() const { return frameNumber % FRAME_OVERLAP; }
-
-    AllocatedImage createImage(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
-    AllocatedImage createImage(VkCommandBuffer cmd, std::vector<AllocatedBuffer>& stagingBuffers, void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
 
     void deferDestroy(VkBuffer buffer, VmaAllocation allocation);
     void deferDestroy(VkImage image, VkImageView view, VmaAllocation allocation);
@@ -238,9 +218,7 @@ public:
 
     PFN_vkCmdPushDescriptorSetKHR vkCmdPushDescriptorSetKHR;
 
-    void immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function);
-
-    std::unordered_map<std::string, std::shared_ptr<LoadedGLTF>> loadedScenes;
+    std::unordered_map<std::string, std::shared_ptr<LoadedScene>> loadedScenes;
 
     float renderScale = 1;
 
@@ -248,6 +226,15 @@ public:
     VkPresentModeKHR presentMode { VK_PRESENT_MODE_FIFO_KHR };
     bool freezeRendering{false};
 private:
+    bool beginFrame(uint32_t& swapchainImageIndex);
+    VkCommandBuffer beginCommandBuffer();
+    void recordBackgroundPass(VkCommandBuffer cmd);
+    void recordGeometryPass(VkCommandBuffer cmd);
+    void recordTonemapPass(VkCommandBuffer cmd);
+    void recordBlitPass(VkCommandBuffer cmd, uint32_t swapchainImageIndex);
+    void recordUiPass(VkCommandBuffer cmd, uint32_t swapchainImageIndex);
+    void submitAndPresent(VkCommandBuffer cmd, uint32_t swapchainImageIndex);
+
     void initVulkan();
 
     void initSwapchain();

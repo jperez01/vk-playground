@@ -6,6 +6,8 @@ add_executable (demo
   vk_engine.h
   gpu_profiler.cpp
   gpu_profiler.h
+  upload_batch.h
+  upload_batch.cpp
 
   vk_loader.h
   vk_loader.cpp

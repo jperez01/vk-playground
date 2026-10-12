@@ -7,7 +7,11 @@
 
 #include <assimp/scene.h>
 
-#include "vk_engine.h"
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
 #include "vk_types.h"
 
 struct Mesh {
@@ -37,14 +41,12 @@ class Model {
 public:
     Model(const std::string& filePath);
 
+    bool loaded { false };
     std::string overallPath;
 
     std::vector<Mesh> meshes;
     std::vector<MaterialInfo> materialInfo;
     std::unordered_map<std::string, TextureInfo> alreadyLoadedImages;
-
-    std::vector<GPUMeshBuffers> gpuMeshBuffers;
-    std::unordered_map<std::string, AllocatedImage> gpuTextures;
 
 private:
     void populateMeshBuffer(const aiScene* scene);
@@ -53,7 +55,6 @@ private:
     std::vector<std::string> loadMaterialTextures(const aiScene *scene, const aiMaterial *material, aiTextureType type, std::string typeName);
     std::optional<TextureInfo> loadTexture(const char* path, void* dataBuffer, unsigned int bufferSize);
 };
-
 
 
 #endif //MODEL_H

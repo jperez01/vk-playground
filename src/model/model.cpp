@@ -23,9 +23,11 @@ Model::Model(const std::string& filePath) {
     if (scene == nullptr) {
         std::cerr << "Failed to load model " << finalPath << std::endl;
         std::cerr << importer.GetErrorString() << std::endl;
+        return;
     }
     populateMeshBuffer(scene);
     populateTextures(scene);
+    loaded = true;
 }
 
 void Model::populateMeshBuffer(const aiScene* scene) {
@@ -41,11 +43,21 @@ void Model::populateMeshBuffer(const aiScene* scene) {
             vertex.position.x = mesh->mVertices[i].x;
             vertex.position.y = mesh->mVertices[i].y;
             vertex.position.z = mesh->mVertices[i].z;
-            vertex.normal.x = mesh->mNormals[i].x;
-            vertex.normal.y = mesh->mNormals[i].y;
-            vertex.normal.z = mesh->mNormals[i].z;
-            vertex.uv_x = mesh->mTextureCoords[0][i].x;
-            vertex.uv_y = mesh->mTextureCoords[0][i].y;
+            if (mesh->mNormals) {
+                vertex.normal.x = mesh->mNormals[i].x;
+                vertex.normal.y = mesh->mNormals[i].y;
+                vertex.normal.z = mesh->mNormals[i].z;
+            } else {
+                vertex.normal = glm::vec3(0.f, 1.f, 0.f);
+            }
+            if (mesh->mTextureCoords[0]) {
+                vertex.uv_x = mesh->mTextureCoords[0][i].x;
+                vertex.uv_y = mesh->mTextureCoords[0][i].y;
+            } else {
+                vertex.uv_x = 0.f;
+                vertex.uv_y = 0.f;
+            }
+            vertex.color = glm::vec4(1.f);
 
             newMesh.vertices[i] = vertex;
         }
@@ -100,7 +112,8 @@ std::vector<std::string> Model::loadMaterialTextures(const aiScene *scene, const
         aiString str;
         material->GetTexture(type, i, &str);
 
-        auto foundImage = alreadyLoadedImages.find(str.C_Str());
+        auto finalPath = overallPath + str.C_Str();
+        auto foundImage = alreadyLoadedImages.find(finalPath);
         if (foundImage == alreadyLoadedImages.end()) {
             const aiTexture* embeddedTexture = scene->GetEmbeddedTexture(str.C_Str());
             auto totalSize = 0;
@@ -110,8 +123,6 @@ std::vector<std::string> Model::loadMaterialTextures(const aiScene *scene, const
                 embeddedData = embeddedTexture->pcData;
             }
 
-            auto filePath = str.C_Str();
-            auto finalPath = overallPath + filePath;
             auto textureResult = loadTexture(finalPath.c_str(), embeddedData, totalSize);
             if (textureResult.has_value()) {
                 auto textureInfo = std::move(textureResult.value());
@@ -120,6 +131,8 @@ std::vector<std::string> Model::loadMaterialTextures(const aiScene *scene, const
                 materialTexturePaths.push_back(finalPath);
                 alreadyLoadedImages[finalPath] = std::move(textureInfo);
             }
+        } else {
+            materialTexturePaths.push_back(finalPath);
         }
     }
 
@@ -146,4 +159,3 @@ std::optional<TextureInfo> Model::loadTexture(const char *path, void *dataBuffer
 
     return info;
 }
-

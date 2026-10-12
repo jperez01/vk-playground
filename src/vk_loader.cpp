@@ -4,6 +4,8 @@
 #include <vk_loader.h>
 
 #include "vk_engine.h"
+#include "model/model.h"
+#include "upload_batch.h"
 #include "vk_initializers.h"
 #include "vk_types.h"
 #include <glm/gtx/quaternion.hpp>
@@ -14,7 +16,7 @@
 #include <fastgltf/util.hpp>
 
 #include "utils/util.h"
-std::optional<AllocatedImage> loadImage(VulkanEngine* engine, fastgltf::Asset& asset, fastgltf::Image& image, VkCommandBuffer cmd, std::vector<AllocatedBuffer>& stagingBuffers, VkFormat format)
+std::optional<AllocatedImage> loadImage(VulkanEngine* engine, fastgltf::Asset& asset, fastgltf::Image& image, UploadBatch& batch, VkFormat format)
 {
     AllocatedImage newImage {};
 
@@ -37,7 +39,7 @@ std::optional<AllocatedImage> loadImage(VulkanEngine* engine, fastgltf::Asset& a
                     imagesize.height = height;
                     imagesize.depth = 1;
 
-                    newImage = engine->createImage(cmd, stagingBuffers, data, imagesize, format, VK_IMAGE_USAGE_SAMPLED_BIT,true);
+                    newImage = batch.uploadImage(data, imagesize, format, VK_IMAGE_USAGE_SAMPLED_BIT,true);
 
                     stbi_image_free(data);
                 }
@@ -51,7 +53,7 @@ std::optional<AllocatedImage> loadImage(VulkanEngine* engine, fastgltf::Asset& a
                     imagesize.height = height;
                     imagesize.depth = 1;
 
-                    newImage = engine->createImage(cmd, stagingBuffers, data, imagesize, format, VK_IMAGE_USAGE_SAMPLED_BIT,true);
+                    newImage = batch.uploadImage(data, imagesize, format, VK_IMAGE_USAGE_SAMPLED_BIT,true);
 
                     stbi_image_free(data);
                 }
@@ -74,7 +76,7 @@ std::optional<AllocatedImage> loadImage(VulkanEngine* engine, fastgltf::Asset& a
                                        imagesize.height = height;
                                        imagesize.depth = 1;
 
-                                       newImage = engine->createImage(cmd, stagingBuffers, data, imagesize, format,
+                                       newImage = batch.uploadImage(data, imagesize, format,
                                            VK_IMAGE_USAGE_SAMPLED_BIT,true);
 
                                        stbi_image_free(data);
@@ -125,24 +127,13 @@ VkSamplerMipmapMode extractMipmapMode(fastgltf::Filter filter)
     }
 }
 
-std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::string_view filePath)
+std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::string_view filePath)
 {
     fmt::print("Loading GLTF: {}", filePath);
 
-    std::shared_ptr<LoadedGLTF> scene = std::make_shared<LoadedGLTF>();
+    std::shared_ptr<LoadedScene> scene = std::make_shared<LoadedScene>();
     scene->creator = engine;
-    LoadedGLTF& file = *scene.get();
-
-    std::vector<AllocatedBuffer> stagingBuffers;
-    VkCommandBuffer cmd = engine->immCommandBuffer;
-    vkResetFences(engine->device, 1, &engine->immFence);
-    vkResetCommandBuffer(cmd, 0);
-
-    VkCommandBufferBeginInfo cmdBeginInfo = {};
-    cmdBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    cmdBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &cmdBeginInfo);
-
+    LoadedScene& file = *scene.get();
 
     fastgltf::Parser parser {};
 
@@ -177,6 +168,9 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
         std::cerr << "Failed to determine glTF container" << std::endl;
         return {};
     }
+
+    UploadBatch batch(engine->uploadContext);
+
     // we can stimate the descriptors we will need accurately
 
     // load samplers
@@ -218,7 +212,7 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
     for (size_t imageIdx = 0; imageIdx < gltf.images.size(); imageIdx++) {
         fastgltf::Image& image = gltf.images[imageIdx];
         VkFormat format = srgbImages.contains(imageIdx) ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
-        std::optional<AllocatedImage> img = loadImage(engine, gltf, image, cmd, stagingBuffers, format);
+        std::optional<AllocatedImage> img = loadImage(engine, gltf, image, batch, format);
 
         if (img.has_value()) {
             file.images[image.name.c_str()] = std::move(*img);
@@ -388,7 +382,7 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
     }
 
     if (!vertices.empty()) {
-        auto sharedBuffers = std::make_shared<GPUMeshBuffers>(engine->uploadMesh(cmd, stagingBuffers, indices, vertices));
+        auto sharedBuffers = std::make_shared<GPUMeshBuffers>(batch.uploadMesh(indices, vertices));
         for (auto& m : meshes) {
             m->meshBuffers = sharedBuffers;
         }
@@ -444,19 +438,12 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
             node->refreshTransform(glm::mat4 { 1.f });
         }
     }
-    vkEndCommandBuffer(cmd);
-
-    VkCommandBufferSubmitInfo cmdinfo = vkinit::commandBufferSubmitInfo(cmd);
-    VkSubmitInfo2 submit = vkinit::submitInfo(&cmdinfo, nullptr, nullptr);
-
-    vkQueueSubmit2(engine->graphicsQueue, 1, &submit, engine->immFence);
-    vkWaitForFences(engine->device, 1, &engine->immFence, true, 9999999999);
-
+    batch.submitAndWait();
 
     return scene;
 }
 
-void LoadedGLTF::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
+void LoadedScene::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
 {
     // create renderables from the scenenodes
     for (auto& n : topNodes) {
@@ -464,9 +451,128 @@ void LoadedGLTF::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
     }
 }
 
-void LoadedGLTF::clearAll()
+void LoadedScene::clearAll()
 {
     for (auto& sampler : samplers) {
         creator->deferDestroy(sampler);
     }
+}
+
+std::optional<std::shared_ptr<LoadedScene>> loadModel(VulkanEngine* engine, const std::string& filePath)
+{
+    Model model(filePath);
+    if (!model.loaded) return {};
+
+    auto scene = std::make_shared<LoadedScene>();
+    scene->creator = engine;
+
+    UploadBatch batch(engine->uploadContext);
+
+    for (auto& [path, textureInfo] : model.alreadyLoadedImages) {
+        VkExtent3D extent = { (uint32_t)textureInfo.width, (uint32_t)textureInfo.height, 1 };
+        VkFormat format = textureInfo.type == "texture_diffuse" ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+        bool mipmapped = extent.width > 2 && extent.height > 2;
+        scene->images[path] = batch.uploadImage(textureInfo.data, extent, format, VK_IMAGE_USAGE_SAMPLED_BIT, mipmapped);
+
+        stbi_image_free(textureInfo.data);
+        textureInfo.data = nullptr;
+    }
+
+    size_t materialCount = std::max<size_t>(model.materialInfo.size(), 1);
+    scene->materialDataBuffer = vkutil::createBuffer(engine->allocator, sizeof(GPUGLTFMaterial) * materialCount,
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, vkutil::HOST_WRITE_MAPPED);
+
+    VkBufferDeviceAddressInfo deviceAddressInfo{ .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = scene->materialDataBuffer.buffer };
+    VkDeviceAddress materialBufferAddress = vkGetBufferDeviceAddress(engine->device, &deviceAddressInfo);
+    GPUGLTFMaterial* sceneMaterialConstants = (GPUGLTFMaterial*)scene->materialDataBuffer.info.pMappedData;
+
+    std::vector<std::shared_ptr<GLTFMaterial>> materials;
+    for (size_t i = 0; i < materialCount; i++) {
+        VkImageView colorView = engine->whiteImage.imageView;
+        if (i < model.materialInfo.size()) {
+            const MaterialInfo& info = model.materialInfo[i];
+            for (size_t t = 0; t < info.texturePaths.size(); t++) {
+                if (info.textureFileTypes[t] != "texture_diffuse") continue;
+                auto foundImage = scene->images.find(info.texturePaths[t]);
+                if (foundImage != scene->images.end()) {
+                    colorView = foundImage->second.imageView;
+                    break;
+                }
+            }
+        }
+
+        GPUGLTFMaterial constants{};
+        constants.colorFactors = glm::vec4(1.f);
+        constants.metal_rough_factors = glm::vec4(1.f, 1.f, 0.f, 0.f);
+        constants.colorTexID = engine->addGlobalTexture(colorView, engine->defaultSamplerLinear);
+        constants.metalRoughTexID = engine->addGlobalTexture(engine->whiteImage.imageView, engine->defaultSamplerLinear);
+        sceneMaterialConstants[i] = constants;
+
+        auto newMat = std::make_shared<GLTFMaterial>();
+        newMat->data.passType = MaterialPass::MainColor;
+        newMat->data.pipeline = &engine->metalRoughMaterial.opaquePipeline;
+        newMat->data.materialBuffer = materialBufferAddress + i * sizeof(GPUGLTFMaterial);
+
+        materials.push_back(newMat);
+        scene->materials["material" + std::to_string(i)] = newMat;
+    }
+
+    std::vector<uint32_t> indices;
+    std::vector<Vertex> vertices;
+    std::vector<std::shared_ptr<MeshAsset>> meshAssets;
+
+    for (size_t i = 0; i < model.meshes.size(); i++) {
+        Mesh& mesh = model.meshes[i];
+        auto meshAsset = std::make_shared<MeshAsset>();
+        meshAsset->name = mesh.name.empty() ? "mesh" + std::to_string(i) : mesh.name;
+
+        GeoSurface surface;
+        surface.startIndex = (uint32_t)indices.size();
+        surface.count = (uint32_t)mesh.indices.size();
+        surface.material = materials[std::min<size_t>(mesh.materialIndex, materials.size() - 1)];
+
+        size_t initialVertex = vertices.size();
+        indices.reserve(indices.size() + mesh.indices.size());
+        for (uint32_t idx : mesh.indices) {
+            indices.push_back(idx + (uint32_t)initialVertex);
+        }
+        vertices.insert(vertices.end(), mesh.vertices.begin(), mesh.vertices.end());
+
+        if (!mesh.vertices.empty()) {
+            glm::vec3 minpos = vertices[initialVertex].position;
+            glm::vec3 maxpos = minpos;
+            for (size_t v = initialVertex; v < vertices.size(); v++) {
+                minpos = glm::min(minpos, vertices[v].position);
+                maxpos = glm::max(maxpos, vertices[v].position);
+            }
+            surface.bounds.origin = (maxpos + minpos) / 2.f;
+            surface.bounds.extents = (maxpos - minpos) / 2.f;
+            surface.bounds.sphereRadius = glm::length(surface.bounds.extents);
+        } else {
+            surface.bounds = Bounds { glm::vec3(0.f), 0.f, glm::vec3(0.f) };
+        }
+
+        meshAsset->surfaces.push_back(surface);
+        meshAssets.push_back(meshAsset);
+        scene->meshes[meshAsset->name + "_" + std::to_string(i)] = meshAsset;
+    }
+
+    if (!vertices.empty()) {
+        auto shared = std::make_shared<GPUMeshBuffers>(batch.uploadMesh(indices, vertices));
+        for (auto& meshAsset : meshAssets) {
+            meshAsset->meshBuffers = shared;
+        }
+    }
+
+    for (size_t i = 0; i < meshAssets.size(); i++) {
+        auto node = std::make_shared<MeshNode>();
+        node->mesh = meshAssets[i];
+        node->localTransform = glm::mat4(1.f);
+        node->worldTransform = glm::mat4(1.f);
+        scene->nodes["node" + std::to_string(i)] = node;
+        scene->topNodes.push_back(node);
+    }
+
+    batch.submitAndWait();
+    return scene;
 }
