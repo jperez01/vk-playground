@@ -15,7 +15,7 @@
 #include <fastgltf/tools.hpp>
 #include <fastgltf/util.hpp>
 
-#include "utils/util.h"
+#include <vk_resources.h>
 
 // Returns name if unused in the map, otherwise name + "#" + index, so unnamed or duplicate glTF names don't collide.
 template <typename Map>
@@ -292,7 +292,7 @@ std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::
 
         // build material instance
         newMat->data.passType = passType;
-        newMat->data.pipeline = (passType == MaterialPass::Transparent) ? &engine->metalRoughMaterial.transparentPipeline : &engine->metalRoughMaterial.opaquePipeline;
+        newMat->data.pipeline = (passType == MaterialPass::Transparent) ? &engine->meshPipelines.transparentPipeline : &engine->meshPipelines.opaquePipeline;
         newMat->data.materialBuffer = materialBufferAddress + (data_index * sizeof(GPUGLTFMaterial));
 
         data_index++;
@@ -312,7 +312,7 @@ std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::
         sceneMaterialConstants[data_index] = constants;
 
         defaultMat->data.passType = MaterialPass::MainColor;
-        defaultMat->data.pipeline = &engine->metalRoughMaterial.opaquePipeline;
+        defaultMat->data.pipeline = &engine->meshPipelines.opaquePipeline;
         defaultMat->data.materialBuffer = materialBufferAddress + (data_index * sizeof(GPUGLTFMaterial));
     }
 
@@ -542,7 +542,7 @@ std::optional<std::shared_ptr<LoadedScene>> loadModel(VulkanEngine* engine, cons
 
         auto newMat = std::make_shared<GLTFMaterial>();
         newMat->data.passType = MaterialPass::MainColor;
-        newMat->data.pipeline = &engine->metalRoughMaterial.opaquePipeline;
+        newMat->data.pipeline = &engine->meshPipelines.opaquePipeline;
         newMat->data.materialBuffer = materialBufferAddress + i * sizeof(GPUGLTFMaterial);
 
         materials.push_back(newMat);

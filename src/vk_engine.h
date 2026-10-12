@@ -4,11 +4,8 @@
 
 #include <vk_types.h>
 
-#include <deque>
-#include <functional>
 #include <map>
 #include <utility>
-#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -86,7 +83,8 @@ struct EngineStats {
     float geometryRecordTime;
 };
 
-struct GLTFMetallic_Roughness {
+// Opaque and transparent mesh pipelines shared by glTF and Assimp scenes.
+struct MeshPipelines {
     MaterialPipeline opaquePipeline;
     MaterialPipeline transparentPipeline;
 
@@ -150,7 +148,7 @@ public:
 
 	VkDescriptorSetLayout gpuSceneDataDescriptorLayout;
 
-    GLTFMetallic_Roughness metalRoughMaterial;
+    MeshPipelines meshPipelines;
 
     // draw resources
     AllocatedImage drawImage;
@@ -177,8 +175,6 @@ public:
     DrawContext drawCommands;
     GPUSceneData sceneData;
 
-    Camera mainCamera;
-
     EngineStats stats;
     GpuProfiler gpuProfiler;
 
@@ -199,8 +195,6 @@ public:
 
     // draw loop
     void draw();
-
-	void renderNodes();
 
     void drawGeometry(VkCommandBuffer cmd);
 

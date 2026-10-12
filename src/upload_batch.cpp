@@ -2,7 +2,7 @@
 
 #include "vk_images.h"
 #include "vk_initializers.h"
-#include "utils/util.h"
+#include <vk_resources.h>
 
 #include <cassert>
 

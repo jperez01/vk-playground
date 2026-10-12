@@ -11,9 +11,6 @@ add_executable (demo
 
   vk_loader.h
   vk_loader.cpp
-  utils/util.cpp
-  utils/util.h
-  utils/util.h
   model/model.cpp
   model/model.h
         app/application.cpp
@@ -37,4 +34,4 @@ add_dependencies(demo Shaders)
 add_custom_command(TARGET demo POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:demo> $<TARGET_FILE_DIR:demo>
   COMMAND_EXPAND_LISTS
-  )
+)

@@ -256,3 +256,24 @@ bool vkutil::loadShaderModule(const char* filePath,
     *outShaderModule = shaderModule;
     return true;
 }
+
+VkPipeline vkutil::createComputePipeline(VkDevice device, const char* shaderName, VkPipelineLayout layout)
+{
+    VkShaderModule shader;
+    if (!loadShaderModule(shaderName, device, &shader)) {
+        fmt::print("Error when loading the compute shader {}\n", shaderName);
+        abort();
+    }
+
+    VkComputePipelineCreateInfo createInfo = {};
+    createInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    createInfo.pNext = nullptr;
+    createInfo.layout = layout;
+    createInfo.stage = vkinit::pipelineShaderStageCreateInfo(VK_SHADER_STAGE_COMPUTE_BIT, shader);
+
+    VkPipeline pipeline;
+    VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &createInfo, nullptr, &pipeline));
+
+    vkDestroyShaderModule(device, shader, nullptr);
+    return pipeline;
+}

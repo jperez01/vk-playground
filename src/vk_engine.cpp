@@ -23,7 +23,7 @@
 
 #include "vk_mem_alloc.h"
 #include "app/ui.h"
-#include "utils/util.h"
+#include <vk_resources.h>
 
 #ifdef NDEBUG
 constexpr bool bUseValidationLayers = false;
@@ -117,7 +117,7 @@ void VulkanEngine::cleanup()
     // make sure the gpu has stopped doing its things
     vkDeviceWaitIdle(device);
 
-	metalRoughMaterial.clearResources(device);
+	meshPipelines.clearResources(device);
 	
 	// Explicitly clear global resources so their RAII destructors fire before the device is destroyed
 	drawImage = {};
@@ -201,31 +201,6 @@ void VulkanEngine::initBackgroundPipelines()
 
 	VK_CHECK(vkCreatePipelineLayout(device, &computeLayout, nullptr, &gradientPipelineLayout));
 
-	VkShaderModule gradientShader;
-	if (!vkutil::loadShaderModule("gradient_color.comp", device, &gradientShader)) {
-		fmt::print("Error when building the compute shader \n");
-		abort();
-	}
-
-	VkShaderModule skyShader;
-	if (!vkutil::loadShaderModule("sky.comp", device, &skyShader)) {
-        fmt::print("Error when building the compute shader\n");
-		abort();
-	}
-
-	VkPipelineShaderStageCreateInfo stageinfo{};
-	stageinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-	stageinfo.pNext = nullptr;
-	stageinfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-	stageinfo.module = gradientShader;
-	stageinfo.pName = "main";
-
-	VkComputePipelineCreateInfo computePipelineCreateInfo{};
-	computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-	computePipelineCreateInfo.pNext = nullptr;
-	computePipelineCreateInfo.layout = gradientPipelineLayout;
-	computePipelineCreateInfo.stage = stageinfo;
-
 	ComputeEffect gradient{};
 	gradient.layout = gradientPipelineLayout;
 	gradient.name = "gradient";
@@ -235,10 +210,7 @@ void VulkanEngine::initBackgroundPipelines()
 	gradient.data.data1 = glm::vec4(1, 0, 0, 1);
 	gradient.data.data2 = glm::vec4(0, 0, 1, 1);
 
-	VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &gradient.pipeline));
-
-	//change the shader module only to create the sky shader
-	computePipelineCreateInfo.stage.module = skyShader;
+	gradient.pipeline = vkutil::createComputePipeline(device, "gradient_color.comp", gradientPipelineLayout);
 
 	ComputeEffect sky{};
 	sky.layout = gradientPipelineLayout;
@@ -247,15 +219,11 @@ void VulkanEngine::initBackgroundPipelines()
 	//default sky parameters
 	sky.data.data1 = glm::vec4(0.1, 0.2, 0.4, 0.97);
 
-	VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &sky.pipeline));
+	sky.pipeline = vkutil::createComputePipeline(device, "sky.comp", gradientPipelineLayout);
 
 	//add the 2 background effects into the array
 	backgroundEffects.push_back(gradient);
 	backgroundEffects.push_back(sky);
-
-	//destroy structures properly
-	vkDestroyShaderModule(device, gradientShader, nullptr);
-	vkDestroyShaderModule(device, skyShader, nullptr);
 }
 
 
@@ -1129,7 +1097,7 @@ void VulkanEngine::initPipelines()
     initBackgroundPipelines();
     initPostProcessPipeline();
 
-    metalRoughMaterial.buildPipelines(this);
+    meshPipelines.buildPipelines(this);
 }
 
 void VulkanEngine::initDescriptors()
@@ -1188,7 +1156,7 @@ void VulkanEngine::initDescriptors()
     }
 }
 
-void GLTFMetallic_Roughness::buildPipelines(VulkanEngine* engine)
+void MeshPipelines::buildPipelines(VulkanEngine* engine)
 {
 	VkShaderModule meshFragShader;
 	if (!vkutil::loadShaderModule("basic.frag", engine->device, &meshFragShader)) {
@@ -1287,28 +1255,7 @@ void VulkanEngine::initPostProcessPipeline() {
 
 	VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &postProcessPipelineLayout));
 
-	VkShaderModule computeShader;
-	if (!vkutil::loadShaderModule("post_process.comp", device, &computeShader)) {
-		fmt::print("Error when loading the post_process compute shader module\n");
-		abort();
-	}
-
-	VkPipelineShaderStageCreateInfo stageinfo{};
-	stageinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-	stageinfo.pNext = nullptr;
-	stageinfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-	stageinfo.module = computeShader;
-	stageinfo.pName = "main";
-
-	VkComputePipelineCreateInfo computePipelineCreateInfo{};
-	computePipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-	computePipelineCreateInfo.pNext = nullptr;
-	computePipelineCreateInfo.layout = postProcessPipelineLayout;
-	computePipelineCreateInfo.stage = stageinfo;
-
-	VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &postProcessPipeline));
-
-	vkDestroyShaderModule(device, computeShader, nullptr);
+	postProcessPipeline = vkutil::createComputePipeline(device, "post_process.comp", postProcessPipelineLayout);
 }
 
 void VulkanEngine::handleImGui() {
@@ -1372,7 +1319,7 @@ void VulkanEngine::handleImGui() {
 	ImGui::Render();
 }
 
-void GLTFMetallic_Roughness::clearResources(VkDevice device)
+void MeshPipelines::clearResources(VkDevice device)
 {
 	if (opaquePipeline.pipeline != VK_NULL_HANDLE) {
 		vkDestroyPipeline(device, opaquePipeline.pipeline, nullptr);

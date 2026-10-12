@@ -1,8 +1,6 @@
-//
-// Created by jpabl on 06/07/2024.
-//
+// GPU buffer and image creation helpers.
 
-#include "util.h"
+#include <vk_resources.h>
 
 #include "vk_initializers.h"
 
@@ -57,12 +55,4 @@ AllocatedImage vkutil::createImage(VkDevice device, VmaAllocator allocator, VkEx
         );
 
     return image;
-}
-
-void vkutil::destroyImage(VkDevice device, VmaAllocator allocator, const AllocatedImage& image) {
-    vkDestroyImageView(device, image.imageView, nullptr);
-    vmaDestroyImage(allocator, image.image, image.allocation);
-}
-void vkutil::destroyBuffer(VmaAllocator allocator, const AllocatedBuffer& buffer) {
-    vmaDestroyBuffer(allocator, buffer.buffer, buffer.allocation);
 }
