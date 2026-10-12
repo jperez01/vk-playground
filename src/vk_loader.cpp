@@ -1,5 +1,6 @@
 #include "stb_image.h"
 #include <iostream>
+#include <unordered_set>
 #include <vk_loader.h>
 
 #include "vk_engine.h"
@@ -14,7 +15,7 @@
 
 #include "utils/util.h"
 //> loadimg
-std::optional<AllocatedImage> load_image(VulkanEngine* engine, fastgltf::Asset& asset, fastgltf::Image& image, VkCommandBuffer cmd, std::vector<AllocatedBuffer>& stagingBuffers)
+std::optional<AllocatedImage> load_image(VulkanEngine* engine, fastgltf::Asset& asset, fastgltf::Image& image, VkCommandBuffer cmd, std::vector<AllocatedBuffer>& stagingBuffers, VkFormat format)
 {
     AllocatedImage newImage {};
 
@@ -37,7 +38,7 @@ std::optional<AllocatedImage> load_image(VulkanEngine* engine, fastgltf::Asset& 
                     imagesize.height = height;
                     imagesize.depth = 1;
 
-                    newImage = engine->create_image(cmd, stagingBuffers, data, imagesize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT,false);
+                    newImage = engine->create_image(cmd, stagingBuffers, data, imagesize, format, VK_IMAGE_USAGE_SAMPLED_BIT,false);
 
                     stbi_image_free(data);
                 }
@@ -51,7 +52,7 @@ std::optional<AllocatedImage> load_image(VulkanEngine* engine, fastgltf::Asset& 
                     imagesize.height = height;
                     imagesize.depth = 1;
 
-                    newImage = engine->create_image(cmd, stagingBuffers, data, imagesize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT,false);
+                    newImage = engine->create_image(cmd, stagingBuffers, data, imagesize, format, VK_IMAGE_USAGE_SAMPLED_BIT,false);
 
                     stbi_image_free(data);
                 }
@@ -74,7 +75,7 @@ std::optional<AllocatedImage> load_image(VulkanEngine* engine, fastgltf::Asset& 
                                        imagesize.height = height;
                                        imagesize.depth = 1;
 
-                                       newImage = engine->create_image(cmd, stagingBuffers, data, imagesize, VK_FORMAT_R8G8B8A8_UNORM,
+                                       newImage = engine->create_image(cmd, stagingBuffers, data, imagesize, format,
                                            VK_IMAGE_USAGE_SAMPLED_BIT,false);
 
                                        stbi_image_free(data);
@@ -214,8 +215,22 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
 //< load_arrays
 
     // load all textures
-    for (fastgltf::Image& image : gltf.images) {
-        std::optional<AllocatedImage> img = load_image(engine, gltf, image, cmd, stagingBuffers);
+    std::unordered_set<size_t> srgbImages;
+    for (fastgltf::Material& mat : gltf.materials) {
+        if (mat.pbrData.baseColorTexture.has_value()) {
+            auto imageIndex = gltf.textures[mat.pbrData.baseColorTexture->textureIndex].imageIndex;
+            if (imageIndex.has_value()) srgbImages.insert(imageIndex.value());
+        }
+        if (mat.emissiveTexture.has_value()) {
+            auto imageIndex = gltf.textures[mat.emissiveTexture->textureIndex].imageIndex;
+            if (imageIndex.has_value()) srgbImages.insert(imageIndex.value());
+        }
+    }
+
+    for (size_t imageIdx = 0; imageIdx < gltf.images.size(); imageIdx++) {
+        fastgltf::Image& image = gltf.images[imageIdx];
+        VkFormat format = srgbImages.contains(imageIdx) ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+        std::optional<AllocatedImage> img = load_image(engine, gltf, image, cmd, stagingBuffers, format);
 
         if (img.has_value()) {
             file.images[image.name.c_str()] = std::move(*img);
