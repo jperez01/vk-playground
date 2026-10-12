@@ -69,14 +69,14 @@ struct FrameGarbage {
 };
 
 struct FrameData {
-	VkSemaphore _swapchainSemaphore, _renderSemaphore;
-	uint64_t _frameTimelineValue {0};
-    FrameGarbage _garbage;
+	VkSemaphore swapchainSemaphore, renderSemaphore;
+	uint64_t frameTimelineValue {0};
+    FrameGarbage garbage;
     AllocatedBuffer sceneDataBuffer;
     VkDescriptorSet globalDescriptor;
 
-    VkCommandPool _commandPool;
-    VkCommandBuffer _mainCommandBuffer;
+    VkCommandPool commandPool;
+    VkCommandBuffer mainCommandBuffer;
 };
 
 constexpr unsigned int FRAME_OVERLAP = 2;
@@ -192,8 +192,8 @@ public:
 	VkDescriptorSetLayout postProcessImageLayout {VK_NULL_HANDLE};
 	VkDescriptorSet postProcessDescriptorSet {VK_NULL_HANDLE};
 
-	VkSemaphore _timelineSemaphore {VK_NULL_HANDLE};
-	uint64_t _timelineValue {0};
+	VkSemaphore timelineSemaphore {VK_NULL_HANDLE};
+	uint64_t timelineValue {0};
 
     // immediate submit structures
     VkFence immFence;

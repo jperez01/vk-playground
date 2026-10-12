@@ -179,7 +179,7 @@ void VulkanEngine::cleanup()
 
     for (auto& frame : frames) {
         frame.sceneDataBuffer = {};
-        frame._garbage.flush(device, allocator);
+        frame.garbage.flush(device, allocator);
     }
 
 	ImGui_ImplVulkan_Shutdown();
@@ -187,11 +187,11 @@ void VulkanEngine::cleanup()
 	ImGui::DestroyContext();
 
 	for (int i = 0; i < FRAME_OVERLAP; i++) {
-		vkDestroyCommandPool(device, frames[i]._commandPool, nullptr);
-		vkDestroySemaphore(device, frames[i]._swapchainSemaphore, nullptr);
-		vkDestroySemaphore(device, frames[i]._renderSemaphore, nullptr);
+		vkDestroyCommandPool(device, frames[i].commandPool, nullptr);
+		vkDestroySemaphore(device, frames[i].swapchainSemaphore, nullptr);
+		vkDestroySemaphore(device, frames[i].renderSemaphore, nullptr);
 	}
-	vkDestroySemaphore(device, _timelineSemaphore, nullptr);
+	vkDestroySemaphore(device, timelineSemaphore, nullptr);
 
 	vkDestroyCommandPool(device, immCommandPool, nullptr);
 	gpuProfiler.destroy(device);
@@ -404,32 +404,32 @@ void FrameGarbage::flush(VkDevice device, VmaAllocator allocator) {
 }
 
 void VulkanEngine::defer_destroy(VkBuffer buffer, VmaAllocation allocation) {
-    get_current_frame()._garbage.buffers.push_back(buffer);
-    get_current_frame()._garbage.allocations.push_back(allocation);
+    get_current_frame().garbage.buffers.push_back(buffer);
+    get_current_frame().garbage.allocations.push_back(allocation);
 }
 
 void VulkanEngine::defer_destroy(VkImage image, VkImageView view, VmaAllocation allocation) {
-    get_current_frame()._garbage.images.push_back(image);
-    get_current_frame()._garbage.imageViews.push_back(view);
-    get_current_frame()._garbage.allocations.push_back(allocation);
+    get_current_frame().garbage.images.push_back(image);
+    get_current_frame().garbage.imageViews.push_back(view);
+    get_current_frame().garbage.allocations.push_back(allocation);
 }
 
 void VulkanEngine::defer_destroy(VkSampler sampler) {
-    get_current_frame()._garbage.samplers.push_back(sampler);
+    get_current_frame().garbage.samplers.push_back(sampler);
 }
 
 void VulkanEngine::draw()
 {
 	// Wait for the submit that last used this frame slot (FRAME_OVERLAP frames ago),
 	// so the CPU can record this frame while the GPU works on the previous one.
-	uint64_t waitValue = get_current_frame()._frameTimelineValue;
+	uint64_t waitValue = get_current_frame().frameTimelineValue;
 	if (waitValue > 0) {
 		VkSemaphoreWaitInfo waitInfo{};
 		waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
 		waitInfo.pNext = nullptr;
 		waitInfo.flags = 0;
 		waitInfo.semaphoreCount = 1;
-		waitInfo.pSemaphores = &_timelineSemaphore;
+		waitInfo.pSemaphores = &timelineSemaphore;
 		waitInfo.pValues = &waitValue;
 
 		VK_CHECK(vkWaitSemaphores(device, &waitInfo, 1000000000));
@@ -438,11 +438,11 @@ void VulkanEngine::draw()
 	const uint32_t slot = get_current_frame_slot();
 	gpuProfiler.collect(device, slot);
 
-	get_current_frame()._garbage.flush(device, allocator);
+	get_current_frame().garbage.flush(device, allocator);
 	//request image from the swapchain
 	uint32_t swapchainImageIndex;
 
-	VkResult e = vkAcquireNextImageKHR(device, swapchain, 1000000000, get_current_frame()._swapchainSemaphore, nullptr, &swapchainImageIndex);
+	VkResult e = vkAcquireNextImageKHR(device, swapchain, 1000000000, get_current_frame().swapchainSemaphore, nullptr, &swapchainImageIndex);
 	if (e == VK_ERROR_OUT_OF_DATE_KHR) {
         resize_requested = true;
 		return ;
@@ -453,10 +453,10 @@ void VulkanEngine::draw()
 
 
 	//now that we are sure that the commands finished executing, we can safely reset the command buffer to begin recording again.
-	VK_CHECK(vkResetCommandBuffer(get_current_frame()._mainCommandBuffer, 0));
+	VK_CHECK(vkResetCommandBuffer(get_current_frame().mainCommandBuffer, 0));
 
 	//naming it cmd for shorter writing
-	VkCommandBuffer cmd = get_current_frame()._mainCommandBuffer;
+	VkCommandBuffer cmd = get_current_frame().mainCommandBuffer;
 
 	//begin the command buffer recording. We will use this command buffer exactly once, so we want to let vulkan know that
 	VkCommandBufferBeginInfo cmdBeginInfo = vkinit::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
@@ -576,20 +576,20 @@ void VulkanEngine::draw()
 	VK_CHECK(vkEndCommandBuffer(cmd));
 
 	//prepare the submission to the queue.
-	//we want to wait on the _presentSemaphore, as that semaphore is signaled when the swapchain is ready
-	//we will signal the _renderSemaphore, to signal that rendering has finished
+	//we want to wait on the presentSemaphore, as that semaphore is signaled when the swapchain is ready
+	//we will signal the renderSemaphore, to signal that rendering has finished
 
 	VkCommandBufferSubmitInfo cmdinfo = vkinit::command_buffer_submit_info(cmd);
 
-    _timelineValue++;
-    get_current_frame()._frameTimelineValue = _timelineValue;
+    timelineValue++;
+    get_current_frame().frameTimelineValue = timelineValue;
 
-	VkSemaphoreSubmitInfo waitInfo = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR, get_current_frame()._swapchainSemaphore);
+	VkSemaphoreSubmitInfo waitInfo = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR, get_current_frame().swapchainSemaphore);
 
 	VkSemaphoreSubmitInfo signalInfos[2];
 	signalInfos[0] = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, swapchainRenderSemaphores[swapchainImageIndex]);
-	signalInfos[1] = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, _timelineSemaphore);
-	signalInfos[1].value = _timelineValue;
+	signalInfos[1] = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, timelineSemaphore);
+	signalInfos[1].value = timelineValue;
 
 	VkSubmitInfo2 submit = vkinit::submit_info(&cmdinfo, 2, signalInfos, 1, &waitInfo);
 
@@ -597,7 +597,7 @@ void VulkanEngine::draw()
 
 	//prepare present
 	// this will put the image we just rendered to into the visible window.
-	// we want to wait on the _renderSemaphore for that,
+	// we want to wait on the renderSemaphore for that,
 	// as its necessary that drawing commands have finished before the image is displayed to the user
 	VkPresentInfoKHR presentInfo = vkinit::present_info();
 
@@ -1015,7 +1015,7 @@ void VulkanEngine::immediate_submit(std::function<void(VkCommandBuffer cmd)>&& f
     VkSubmitInfo2 submit = vkinit::submit_info(&cmdinfo, nullptr, nullptr);
 
     // submit command buffer to the queue and execute it.
-    //  _renderFence will now block until the graphic commands finish execution
+    //  renderFence will now block until the graphic commands finish execution
     VK_CHECK(vkQueueSubmit2(graphicsQueue, 1, &submit, immFence));
 
     VK_CHECK(vkWaitForFences(device, 1, &immFence, true, 9999999999));
@@ -1215,14 +1215,14 @@ void VulkanEngine::destroy_swapchain()
 
 void VulkanEngine::resize_swapchain()
 {
-    if (_timelineValue > 0) {
+    if (timelineValue > 0) {
         VkSemaphoreWaitInfo waitInfo{};
         waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
         waitInfo.pNext = nullptr;
         waitInfo.flags = 0;
         waitInfo.semaphoreCount = 1;
-        waitInfo.pSemaphores = &_timelineSemaphore;
-        waitInfo.pValues = &_timelineValue;
+        waitInfo.pSemaphores = &timelineSemaphore;
+        waitInfo.pValues = &timelineValue;
 
         VK_CHECK(vkWaitSemaphores(device, &waitInfo, 1000000000));
     }
@@ -1246,12 +1246,12 @@ void VulkanEngine::init_commands()
 
     for (int i = 0; i < FRAME_OVERLAP; i++) {
 
-        VK_CHECK(vkCreateCommandPool(device, &commandPoolInfo, nullptr, &frames[i]._commandPool));
+        VK_CHECK(vkCreateCommandPool(device, &commandPoolInfo, nullptr, &frames[i].commandPool));
 
         // allocate the default command buffer that we will use for rendering
-        VkCommandBufferAllocateInfo cmdAllocInfo = vkinit::command_buffer_allocate_info(frames[i]._commandPool, 1);
+        VkCommandBufferAllocateInfo cmdAllocInfo = vkinit::command_buffer_allocate_info(frames[i].commandPool, 1);
 
-        VK_CHECK(vkAllocateCommandBuffers(device, &cmdAllocInfo, &frames[i]._mainCommandBuffer));
+        VK_CHECK(vkAllocateCommandBuffers(device, &cmdAllocInfo, &frames[i].mainCommandBuffer));
 
     }
 
@@ -1283,13 +1283,13 @@ void VulkanEngine::init_sync_structures()
     VkSemaphoreCreateInfo semaphoreCreateInfo = vkinit::semaphore_create_info();
     semaphoreCreateInfo.pNext = &timelineCreateInfo;
 
-    VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &_timelineSemaphore));
+    VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &timelineSemaphore));
 
     semaphoreCreateInfo.pNext = nullptr;
 
     for (int i = 0; i < FRAME_OVERLAP; i++) {
-        VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frames[i]._swapchainSemaphore));
-        VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frames[i]._renderSemaphore));
+        VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frames[i].swapchainSemaphore));
+        VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frames[i].renderSemaphore));
 
 
     }

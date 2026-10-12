@@ -19,7 +19,7 @@ public:
     void begin(VkCommandBuffer cmd, uint32_t frameSlot, GpuPass pass);
     void end(VkCommandBuffer cmd, uint32_t frameSlot, GpuPass pass);
 
-    bool supported() const { return _supported; }
+    bool supported() const { return timestampsSupported; }
     float pass_ms(GpuPass pass) const;
     float total_ms() const;
     static const char* pass_name(GpuPass pass);
@@ -29,16 +29,16 @@ private:
 
     uint32_t query_index(uint32_t frameSlot, GpuPass pass, bool isEnd) const;
 
-    bool _supported{ false };
-    VkQueryPool _pool{ VK_NULL_HANDLE };
-    float _timestampPeriod{ 0.f };
-    uint32_t _validBits{ 0 };
+    bool timestampsSupported{ false };
+    VkQueryPool queryPool{ VK_NULL_HANDLE };
+    float timestampPeriod{ 0.f };
+    uint32_t validBits{ 0 };
 
-    std::vector<bool> _pending;
-    std::array<float, PassCount> _smoothedMs{};
-    float _smoothedTotal{ 0.f };
-    bool _hasSample{ false };
+    std::vector<bool> pendingResults;
+    std::array<float, PassCount> smoothedMs{};
+    float smoothedTotal{ 0.f };
+    bool hasSample{ false };
 
-    PFN_vkCmdBeginDebugUtilsLabelEXT _beginLabel{ nullptr };
-    PFN_vkCmdEndDebugUtilsLabelEXT _endLabel{ nullptr };
+    PFN_vkCmdBeginDebugUtilsLabelEXT beginLabel{ nullptr };
+    PFN_vkCmdEndDebugUtilsLabelEXT endLabel{ nullptr };
 };
