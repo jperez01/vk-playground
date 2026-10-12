@@ -6,7 +6,7 @@
 
 #include "vk_initializers.h"
 
-AllocatedBuffer vkutil::createBuffer(VmaAllocator allocator, size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage) {
+AllocatedBuffer vkutil::createBuffer(VmaAllocator allocator, size_t allocSize, VkBufferUsageFlags usage, VmaAllocationCreateFlags allocFlags) {
     VkBufferCreateInfo bufferInfo = {};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.pNext = nullptr;
@@ -14,8 +14,8 @@ AllocatedBuffer vkutil::createBuffer(VmaAllocator allocator, size_t allocSize, V
     bufferInfo.usage = usage;
 
     VmaAllocationCreateInfo createInfo = {};
-    createInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
-    createInfo.usage = memoryUsage;
+    createInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    createInfo.flags = allocFlags;
 
     AllocatedBuffer newBuffer = {};
 
@@ -37,7 +37,7 @@ AllocatedImage vkutil::createImage(VkDevice device, VmaAllocator allocator, VkEx
     }
 
     VmaAllocationCreateInfo allocInfo = {};
-    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
     allocInfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     VK_CHECK(

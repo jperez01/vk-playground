@@ -141,7 +141,7 @@ void VulkanEngine::init_default_data() {
 	vkCreateSampler(device, &sampl, nullptr, &defaultSamplerLinear);
 
 	defaultGLTFMaterialData = vkutil::createBuffer(allocator, sizeof(GPUGLTFMaterial),
-		VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+		VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, vkutil::HOST_WRITE_MAPPED);
 
 	VkBufferDeviceAddressInfo deviceAdressInfo{ .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = defaultGLTFMaterialData.buffer };
 	defaultMaterialAddress = vkGetBufferDeviceAddress(device, &deviceAdressInfo);
@@ -322,7 +322,7 @@ void VulkanEngine::draw_main(VkCommandBuffer cmd)
 
 	vkCmdPushConstants(cmd, gradientPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputePushConstants), &effect.data);
 	// execute the compute pipeline dispatch. We are using 16x16 workgroup size so we need to divide by it
-	vkCmdDispatch(cmd, std::ceil(windowExtent.width / 16.0), std::ceil(windowExtent.height / 16.0), 1);
+	vkCmdDispatch(cmd, (uint32_t)std::ceil(drawExtent.width / 16.0), (uint32_t)std::ceil(drawExtent.height / 16.0), 1);
 
 	//draw the triangle
 
@@ -336,13 +336,13 @@ void VulkanEngine::draw_main(VkCommandBuffer cmd)
 	VkRenderingInfo renderInfo = vkinit::rendering_info(drawExtent, &colorAttachment, &depthAttachment);
 
 	vkCmdBeginRendering(cmd, &renderInfo);
-	auto start = std::chrono::system_clock::now();
+	auto start = std::chrono::steady_clock::now();
 	draw_geometry(cmd);
 
-	auto end = std::chrono::system_clock::now();
+	auto end = std::chrono::steady_clock::now();
 	auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
-	stats.mesh_draw_time = elapsed.count() / 1000.f;
+	stats.geometry_record_time = elapsed.count() / 1000.f;
 
 	vkCmdEndRendering(cmd);
 }
@@ -777,7 +777,7 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
 
 void VulkanEngine::run()
 {
-	auto start = std::chrono::system_clock::now();
+	auto start = std::chrono::steady_clock::now();
 	if (resize_requested) {
 		resize_swapchain();
 	}
@@ -785,7 +785,7 @@ void VulkanEngine::run()
 
 	draw();
 
-	auto end = std::chrono::system_clock::now();
+	auto end = std::chrono::steady_clock::now();
 	auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
 	stats.frametime = elapsed.count() / 1000.f;
@@ -810,7 +810,7 @@ void VulkanEngine::update_scene(const glm::mat4& viewMatrix)
 //> create_mip_2
 AllocatedImage VulkanEngine::create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped) {
 	size_t data_size = size.depth * size.width * size.height * 4;
-	AllocatedBuffer uploadbuffer = vkutil::createBuffer(allocator, data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	AllocatedBuffer uploadbuffer = vkutil::createBuffer(allocator, data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, vkutil::HOST_WRITE_MAPPED);
 
 	memcpy(uploadbuffer.info.pMappedData, data, data_size);
 
@@ -846,7 +846,7 @@ AllocatedImage VulkanEngine::create_image(void* data, VkExtent3D size, VkFormat 
 
 AllocatedImage VulkanEngine::create_image(VkCommandBuffer cmd, std::vector<AllocatedBuffer>& stagingBuffers, void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped) {
 	size_t data_size = size.depth * size.width * size.height * 4;
-	AllocatedBuffer uploadbuffer = vkutil::createBuffer(allocator, data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	AllocatedBuffer uploadbuffer = vkutil::createBuffer(allocator, data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, vkutil::HOST_WRITE_MAPPED);
 
 	memcpy(uploadbuffer.info.pMappedData, data, data_size);
 
@@ -888,17 +888,15 @@ GPUMeshBuffers VulkanEngine::uploadMesh(std::span<uint32_t> indices, std::span<V
 
     GPUMeshBuffers newSurface;
 
-    newSurface.vertexBuffer = vkutil::createBuffer(allocator, vertexBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        VMA_MEMORY_USAGE_GPU_ONLY);
+    newSurface.vertexBuffer = vkutil::createBuffer(allocator, vertexBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
 
 
     VkBufferDeviceAddressInfo deviceAdressInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,.buffer = newSurface.vertexBuffer.buffer};
     newSurface.vertexBufferAddress = vkGetBufferDeviceAddress(device, &deviceAdressInfo);
 
-    newSurface.indexBuffer = vkutil::createBuffer(allocator, indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VMA_MEMORY_USAGE_GPU_ONLY);
+    newSurface.indexBuffer = vkutil::createBuffer(allocator, indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
 
-    AllocatedBuffer staging = vkutil::createBuffer(allocator, vertexBufferSize + indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    AllocatedBuffer staging = vkutil::createBuffer(allocator, vertexBufferSize + indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, vkutil::HOST_WRITE_MAPPED);
 
     void* data = staging.allocation->GetMappedData();
 
@@ -934,16 +932,14 @@ GPUMeshBuffers VulkanEngine::uploadMesh(VkCommandBuffer cmd, std::vector<Allocat
 
     GPUMeshBuffers newSurface;
 
-    newSurface.vertexBuffer = vkutil::createBuffer(allocator, vertexBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        VMA_MEMORY_USAGE_GPU_ONLY);
+    newSurface.vertexBuffer = vkutil::createBuffer(allocator, vertexBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
 
     VkBufferDeviceAddressInfo deviceAdressInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,.buffer = newSurface.vertexBuffer.buffer};
     newSurface.vertexBufferAddress = vkGetBufferDeviceAddress(device, &deviceAdressInfo);
 
-    newSurface.indexBuffer = vkutil::createBuffer(allocator, indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VMA_MEMORY_USAGE_GPU_ONLY);
+    newSurface.indexBuffer = vkutil::createBuffer(allocator, indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
 
-    AllocatedBuffer staging = vkutil::createBuffer(allocator, vertexBufferSize + indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    AllocatedBuffer staging = vkutil::createBuffer(allocator, vertexBufferSize + indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, vkutil::HOST_WRITE_MAPPED);
 
     void* data = staging.allocation->GetMappedData();
 
@@ -1116,7 +1112,7 @@ void VulkanEngine::init_swapchain()
 
 	//for the draw image, we want to allocate it from gpu local memory
 	VmaAllocationCreateInfo rimg_allocinfo = {};
-	rimg_allocinfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+	rimg_allocinfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
 	rimg_allocinfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
 	//allocate and create the image
@@ -1159,8 +1155,8 @@ void VulkanEngine::create_swapchain(uint32_t width, uint32_t height)
 	vkb::Swapchain vkbSwapchain = swapchainBuilder
 		//.use_default_format_selection()
 		.set_desired_format(VkSurfaceFormatKHR{ .format = swapchainImageFormat, .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR })
-		//use vsync present mode
-		.set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
+		//falls back to FIFO (vsync) if the desired mode is unsupported
+		.set_desired_present_mode(presentMode)
 		.set_desired_extent(width, height)
 		.add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
 		.build()
@@ -1281,14 +1277,14 @@ void VulkanEngine::init_sync_structures()
 
 void VulkanEngine::init_renderables()
 {
-	auto structureStart = chrono::system_clock::now();
+	auto structureStart = chrono::steady_clock::now();
     std::string structurePath = { "..\\assets\\structure.glb" };
     auto structureFile = loadGltf(this,structurePath);
 
     assert(structureFile.has_value());
 
     loadedScenes["structure"] = *structureFile;
-	auto structureEnd = chrono::system_clock::now();
+	auto structureEnd = chrono::steady_clock::now();
 	auto structureElapsed = chrono::duration_cast<chrono::milliseconds>(structureEnd - structureStart).count();
 	fmt::println("Time elapsed loading structure: {} ms", structureElapsed);
 
@@ -1386,7 +1382,7 @@ void VulkanEngine::init_descriptors()
     {
         DescriptorLayoutBuilder builder;
         builder.add_binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-        builder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000); // Global texture array
+        builder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_GLOBAL_TEXTURES); // Global texture array
 
         VkDescriptorBindingFlags bindFlags[2] = { 0, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT };
         VkDescriptorSetLayoutBindingFlagsCreateInfo extendedInfo = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO };
@@ -1416,7 +1412,7 @@ void VulkanEngine::init_descriptors()
 
     for (int i = 0; i < FRAME_OVERLAP; i++) {
         frames[i].globalDescriptor = globalDescriptorAllocator.allocate(device, gpuSceneDataDescriptorLayout);
-        frames[i].sceneDataBuffer = vkutil::createBuffer(allocator, sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+        frames[i].sceneDataBuffer = vkutil::createBuffer(allocator, sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, vkutil::HOST_WRITE_MAPPED);
 
         VkDescriptorBufferInfo bufInfo{};
         bufInfo.buffer = frames[i].sceneDataBuffer.buffer;
@@ -1439,7 +1435,7 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine* engine)
 {
 	VkShaderModule meshFragShader;
 	if (!vkutil::load_shader_module("basic.frag", engine->device, &meshFragShader)) {
-		fmt::println("Error when building the triangle fragment shader module\n");
+		fmt::println("Error when building the triangle fragment shader module");
 		abort();
 	}
 
@@ -1553,7 +1549,7 @@ void VulkanEngine::init_post_process_pipeline() {
 
 	//for the draw image, we want to allocate it from gpu local memory
 	VmaAllocationCreateInfo rimg_allocinfo = {};
-	rimg_allocinfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+	rimg_allocinfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
 	rimg_allocinfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
 	//allocate and create the image
@@ -1588,19 +1584,22 @@ void VulkanEngine::init_post_process_pipeline() {
 }
 
 void VulkanEngine::sendModelDataToGpu(Model& model) {
-	for (Mesh& mesh: model.meshes) {
-		auto meshBuffer = uploadMesh(mesh.indices, mesh.vertices);
-		model.gpuMeshBuffers.push_back(std::move(meshBuffer));
-	}
+	std::vector<AllocatedBuffer> stagingBuffers;
+	immediate_submit([&](VkCommandBuffer cmd) {
+		for (Mesh& mesh: model.meshes) {
+			auto meshBuffer = uploadMesh(cmd, stagingBuffers, mesh.indices, mesh.vertices);
+			model.gpuMeshBuffers.push_back(std::move(meshBuffer));
+		}
 
-	for (auto& [path, textureInfo] : model.alreadyLoadedImages) {
-		VkExtent3D imageExtent = {(uint32_t) textureInfo.width, (uint32_t) textureInfo.height, 1};
-		bool shouldBeMipmapped = imageExtent.width > 2 && imageExtent.height > 2;
-		VkFormat textureFormat = textureInfo.type == "texture_diffuse" ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
-		auto gpuTexture = create_image(textureInfo.data, imageExtent, textureFormat, VK_IMAGE_USAGE_SAMPLED_BIT, shouldBeMipmapped);
+		for (auto& [path, textureInfo] : model.alreadyLoadedImages) {
+			VkExtent3D imageExtent = {(uint32_t) textureInfo.width, (uint32_t) textureInfo.height, 1};
+			bool shouldBeMipmapped = imageExtent.width > 2 && imageExtent.height > 2;
+			VkFormat textureFormat = textureInfo.type == "texture_diffuse" ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+			auto gpuTexture = create_image(cmd, stagingBuffers, textureInfo.data, imageExtent, textureFormat, VK_IMAGE_USAGE_SAMPLED_BIT, shouldBeMipmapped);
 
-		model.gpuTextures[path] = std::move(gpuTexture);
-	}
+			model.gpuTextures[path] = std::move(gpuTexture);
+		}
+	});
 
 
 	importedModels.push_back(std::make_unique<Model>(std::move(model)));
@@ -1618,7 +1617,19 @@ void VulkanEngine::handleImGui() {
 	ImGui::Begin("Stats");
 
 	ImGui::Text("frametime %f ms", stats.frametime);
-	ImGui::Text("drawtime %f ms", stats.mesh_draw_time);
+	ImGui::Text("geometry record (CPU) %f ms", stats.geometry_record_time);
+
+	const char* presentModeNames[] = { "FIFO (vsync)", "MAILBOX", "IMMEDIATE" };
+	const VkPresentModeKHR presentModes[] = { VK_PRESENT_MODE_FIFO_KHR, VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR };
+	int currentPresentMode = 0;
+	for (int i = 0; i < 3; i++) {
+		if (presentModes[i] == presentMode) currentPresentMode = i;
+	}
+	if (ImGui::Combo("Present mode", &currentPresentMode, presentModeNames, 3)) {
+		presentMode = presentModes[currentPresentMode];
+		resize_requested = true;
+	}
+
 	ImGui::Text("triangles %i", stats.triangle_count);
 	ImGui::Text("draws %i", stats.drawcall_count);
 	ImGui::End();
@@ -1689,11 +1700,11 @@ void MeshNode::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
         RenderObject def;
         def.indexCount = s.count;
         def.firstIndex = s.startIndex;
-        def.indexBuffer = mesh->meshBuffers.indexBuffer.buffer;
+        def.indexBuffer = mesh->meshBuffers->indexBuffer.buffer;
         def.material = &s.material->data;
         def.bounds = s.bounds;
         def.transform = nodeMatrix;
-        def.vertexBufferAddress = mesh->meshBuffers.vertexBufferAddress;
+        def.vertexBufferAddress = mesh->meshBuffers->vertexBufferAddress;
 
         if (s.material->data.passType == MaterialPass::Transparent) {
             ctx.TransparentSurfaces.push_back(def);
@@ -1707,6 +1718,14 @@ void MeshNode::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
 }
 int VulkanEngine::add_global_texture(VkImageView view, VkSampler sampler)
 {
+    auto existing = globalTextureSlots.find({ view, sampler });
+    if (existing != globalTextureSlots.end()) {
+        return existing->second;
+    }
+    if (globalTextureCount >= MAX_GLOBAL_TEXTURES) {
+        fmt::println("Global texture array is full ({} slots)", MAX_GLOBAL_TEXTURES);
+        abort();
+    }
     int index = globalTextureCount++;
     VkDescriptorImageInfo imageInfo{};
     imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -1727,6 +1746,7 @@ int VulkanEngine::add_global_texture(VkImageView view, VkSampler sampler)
         writes[i].dstSet = frames[i].globalDescriptor;
     }
     vkUpdateDescriptorSets(device, FRAME_OVERLAP, writes, 0, nullptr);
+    globalTextureSlots[{ view, sampler }] = index;
     return index;
 }
 

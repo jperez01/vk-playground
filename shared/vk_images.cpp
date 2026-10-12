@@ -1,5 +1,6 @@
 #include <vk_images.h>
 #include <vk_initializers.h>
+#include <algorithm>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -149,8 +150,8 @@ void vkutil::generate_mipmaps(VkCommandBuffer cmd, VkImage image, VkExtent2D ima
     for (int mip = 0; mip < mipLevels; mip++) {
 
         VkExtent2D halfSize = imageSize;
-        halfSize.width /= 2;
-        halfSize.height /= 2;
+        halfSize.width = std::max(1u, imageSize.width / 2);
+        halfSize.height = std::max(1u, imageSize.height / 2);
 
         VkImageMemoryBarrier2 imageBarrier { .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2, .pNext = nullptr };
 
