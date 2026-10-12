@@ -4,6 +4,7 @@
 #include <vk_loader.h>
 
 #include "vk_engine.h"
+#include "upload_batch.h"
 #include "vk_initializers.h"
 #include "vk_types.h"
 #include <glm/gtx/quaternion.hpp>
@@ -14,7 +15,7 @@
 #include <fastgltf/util.hpp>
 
 #include "utils/util.h"
-std::optional<AllocatedImage> loadImage(VulkanEngine* engine, fastgltf::Asset& asset, fastgltf::Image& image, VkCommandBuffer cmd, std::vector<AllocatedBuffer>& stagingBuffers, VkFormat format)
+std::optional<AllocatedImage> loadImage(VulkanEngine* engine, fastgltf::Asset& asset, fastgltf::Image& image, UploadBatch& batch, VkFormat format)
 {
     AllocatedImage newImage {};
 
@@ -37,7 +38,7 @@ std::optional<AllocatedImage> loadImage(VulkanEngine* engine, fastgltf::Asset& a
                     imagesize.height = height;
                     imagesize.depth = 1;
 
-                    newImage = engine->createImage(cmd, stagingBuffers, data, imagesize, format, VK_IMAGE_USAGE_SAMPLED_BIT,true);
+                    newImage = batch.uploadImage(data, imagesize, format, VK_IMAGE_USAGE_SAMPLED_BIT,true);
 
                     stbi_image_free(data);
                 }
@@ -51,7 +52,7 @@ std::optional<AllocatedImage> loadImage(VulkanEngine* engine, fastgltf::Asset& a
                     imagesize.height = height;
                     imagesize.depth = 1;
 
-                    newImage = engine->createImage(cmd, stagingBuffers, data, imagesize, format, VK_IMAGE_USAGE_SAMPLED_BIT,true);
+                    newImage = batch.uploadImage(data, imagesize, format, VK_IMAGE_USAGE_SAMPLED_BIT,true);
 
                     stbi_image_free(data);
                 }
@@ -74,7 +75,7 @@ std::optional<AllocatedImage> loadImage(VulkanEngine* engine, fastgltf::Asset& a
                                        imagesize.height = height;
                                        imagesize.depth = 1;
 
-                                       newImage = engine->createImage(cmd, stagingBuffers, data, imagesize, format,
+                                       newImage = batch.uploadImage(data, imagesize, format,
                                            VK_IMAGE_USAGE_SAMPLED_BIT,true);
 
                                        stbi_image_free(data);
@@ -125,24 +126,13 @@ VkSamplerMipmapMode extractMipmapMode(fastgltf::Filter filter)
     }
 }
 
-std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::string_view filePath)
+std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::string_view filePath)
 {
     fmt::print("Loading GLTF: {}", filePath);
 
-    std::shared_ptr<LoadedGLTF> scene = std::make_shared<LoadedGLTF>();
+    std::shared_ptr<LoadedScene> scene = std::make_shared<LoadedScene>();
     scene->creator = engine;
-    LoadedGLTF& file = *scene.get();
-
-    std::vector<AllocatedBuffer> stagingBuffers;
-    VkCommandBuffer cmd = engine->immCommandBuffer;
-    vkResetFences(engine->device, 1, &engine->immFence);
-    vkResetCommandBuffer(cmd, 0);
-
-    VkCommandBufferBeginInfo cmdBeginInfo = {};
-    cmdBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    cmdBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &cmdBeginInfo);
-
+    LoadedScene& file = *scene.get();
 
     fastgltf::Parser parser {};
 
@@ -177,6 +167,9 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
         std::cerr << "Failed to determine glTF container" << std::endl;
         return {};
     }
+
+    UploadBatch batch(*engine);
+
     // we can stimate the descriptors we will need accurately
 
     // load samplers
@@ -218,7 +211,7 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
     for (size_t imageIdx = 0; imageIdx < gltf.images.size(); imageIdx++) {
         fastgltf::Image& image = gltf.images[imageIdx];
         VkFormat format = srgbImages.contains(imageIdx) ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
-        std::optional<AllocatedImage> img = loadImage(engine, gltf, image, cmd, stagingBuffers, format);
+        std::optional<AllocatedImage> img = loadImage(engine, gltf, image, batch, format);
 
         if (img.has_value()) {
             file.images[image.name.c_str()] = std::move(*img);
@@ -388,7 +381,7 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
     }
 
     if (!vertices.empty()) {
-        auto sharedBuffers = std::make_shared<GPUMeshBuffers>(engine->uploadMesh(cmd, stagingBuffers, indices, vertices));
+        auto sharedBuffers = std::make_shared<GPUMeshBuffers>(batch.uploadMesh(indices, vertices));
         for (auto& m : meshes) {
             m->meshBuffers = sharedBuffers;
         }
@@ -444,19 +437,12 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
             node->refreshTransform(glm::mat4 { 1.f });
         }
     }
-    vkEndCommandBuffer(cmd);
-
-    VkCommandBufferSubmitInfo cmdinfo = vkinit::commandBufferSubmitInfo(cmd);
-    VkSubmitInfo2 submit = vkinit::submitInfo(&cmdinfo, nullptr, nullptr);
-
-    vkQueueSubmit2(engine->graphicsQueue, 1, &submit, engine->immFence);
-    vkWaitForFences(engine->device, 1, &engine->immFence, true, 9999999999);
-
+    batch.submitAndWait();
 
     return scene;
 }
 
-void LoadedGLTF::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
+void LoadedScene::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
 {
     // create renderables from the scenenodes
     for (auto& n : topNodes) {
@@ -464,7 +450,7 @@ void LoadedGLTF::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
     }
 }
 
-void LoadedGLTF::clearAll()
+void LoadedScene::clearAll()
 {
     for (auto& sampler : samplers) {
         creator->deferDestroy(sampler);

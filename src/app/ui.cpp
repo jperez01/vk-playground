@@ -5,6 +5,8 @@
 #include "ui.h"
 
 #include "imgui.h"
+#include "model/model.h"
+#include "vk_engine.h"
 #include "nfd.h"
 #include "fmt/std.h"
 
@@ -39,8 +41,12 @@ void Editor::handleUi(VulkanEngine* engine)
                 auto foundPath = openFileDialog();
                 if (foundPath.has_value())
                 {
-                    Model model(foundPath.value());
-                    engine->sendModelDataToGpu(model);
+                    auto scene = loadModel(engine, foundPath.value());
+                    if (scene.has_value()) {
+                        engine->loadedScenes[foundPath.value()] = *scene;
+                    } else {
+                        fmt::println("Failed to load model {}", foundPath.value());
+                    }
                 }
             }
             if (ImGui::MenuItem("Save", "Ctrl+S")) {

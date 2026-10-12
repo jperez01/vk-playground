@@ -7,8 +7,16 @@
 
 #include <assimp/scene.h>
 
-#include "vk_engine.h"
+#include <memory>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
 #include "vk_types.h"
+
+class VulkanEngine;
+struct LoadedScene;
 
 struct Mesh {
     std::vector<Vertex> vertices;
@@ -37,14 +45,12 @@ class Model {
 public:
     Model(const std::string& filePath);
 
+    bool loaded { false };
     std::string overallPath;
 
     std::vector<Mesh> meshes;
     std::vector<MaterialInfo> materialInfo;
     std::unordered_map<std::string, TextureInfo> alreadyLoadedImages;
-
-    std::vector<GPUMeshBuffers> gpuMeshBuffers;
-    std::unordered_map<std::string, AllocatedImage> gpuTextures;
 
 private:
     void populateMeshBuffer(const aiScene* scene);
@@ -55,5 +61,7 @@ private:
 };
 
 
+
+std::optional<std::shared_ptr<LoadedScene>> loadModel(VulkanEngine* engine, const std::string& filePath);
 
 #endif //MODEL_H
