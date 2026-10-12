@@ -31,7 +31,7 @@ AllocatedImage vkutil::createImage(VkDevice device, VmaAllocator allocator, VkEx
     image.imageFormat = format;
     image.imageExtent = size;
 
-    VkImageCreateInfo imgInfo = vkinit::image_create_info(format, usage, size);
+    VkImageCreateInfo imgInfo = vkinit::imageCreateInfo(format, usage, size);
     if (hasMipMaps) {
         imgInfo.mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(size.width, size.height)))) + 1;
     }
@@ -49,7 +49,7 @@ AllocatedImage vkutil::createImage(VkDevice device, VmaAllocator allocator, VkEx
         aspectFlags = VK_IMAGE_ASPECT_DEPTH_BIT;
     }
 
-    VkImageViewCreateInfo viewInfo = vkinit::imageview_create_info(format, image.image, aspectFlags);
+    VkImageViewCreateInfo viewInfo = vkinit::imageViewCreateInfo(format, image.image, aspectFlags);
     viewInfo.subresourceRange.levelCount = imgInfo.mipLevels;
 
     VK_CHECK(

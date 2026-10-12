@@ -23,8 +23,8 @@
 
 // forward declarations for RAII cleanup
 namespace vkutil {
-    void defer_destroy_buffer(VkBuffer buffer, VmaAllocation allocation);
-    void defer_destroy_image(VkImage image, VkImageView view, VmaAllocation allocation);
+    void deferDestroyBuffer(VkBuffer buffer, VmaAllocation allocation);
+    void deferDestroyImage(VkImage image, VkImageView view, VmaAllocation allocation);
 }
 
 // we will add our main reusable types here
@@ -38,7 +38,7 @@ struct AllocatedImage {
     AllocatedImage() = default;
     ~AllocatedImage() {
         if (image != VK_NULL_HANDLE || imageView != VK_NULL_HANDLE || allocation != VK_NULL_HANDLE) {
-            vkutil::defer_destroy_image(image, imageView, allocation);
+            vkutil::deferDestroyImage(image, imageView, allocation);
         }
     }
 
@@ -53,7 +53,7 @@ struct AllocatedImage {
     AllocatedImage& operator=(AllocatedImage&& other) noexcept {
         if (this != &other) {
             if (image != VK_NULL_HANDLE || imageView != VK_NULL_HANDLE || allocation != VK_NULL_HANDLE) {
-                vkutil::defer_destroy_image(image, imageView, allocation);
+                vkutil::deferDestroyImage(image, imageView, allocation);
             }
             image = other.image;
             imageView = other.imageView;
@@ -77,7 +77,7 @@ struct AllocatedBuffer {
     AllocatedBuffer() = default;
     ~AllocatedBuffer() {
         if (buffer != VK_NULL_HANDLE || allocation != VK_NULL_HANDLE) {
-            vkutil::defer_destroy_buffer(buffer, allocation);
+            vkutil::deferDestroyBuffer(buffer, allocation);
         }
     }
 
@@ -91,7 +91,7 @@ struct AllocatedBuffer {
     AllocatedBuffer& operator=(AllocatedBuffer&& other) noexcept {
         if (this != &other) {
             if (buffer != VK_NULL_HANDLE || allocation != VK_NULL_HANDLE) {
-                vkutil::defer_destroy_buffer(buffer, allocation);
+                vkutil::deferDestroyBuffer(buffer, allocation);
             }
             buffer = other.buffer;
             allocation = other.allocation;

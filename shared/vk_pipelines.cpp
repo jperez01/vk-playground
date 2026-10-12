@@ -24,7 +24,7 @@ void PipelineBuilder::clear()
     shaderStages.clear();
 }
 
-VkPipeline PipelineBuilder::build_pipeline(VkDevice device)
+VkPipeline PipelineBuilder::buildPipeline(VkDevice device)
 {
     // make viewport state from our stored viewport and scissor.
     // at the moment we wont support multiple viewports or scissors
@@ -95,17 +95,17 @@ VkPipeline PipelineBuilder::build_pipeline(VkDevice device)
         return newPipeline;
     }
 }
-void PipelineBuilder::set_shaders(VkShaderModule vertexShader, VkShaderModule fragmentShader)
+void PipelineBuilder::setShaders(VkShaderModule vertexShader, VkShaderModule fragmentShader)
 {
     shaderStages.clear();
 
     shaderStages.push_back(
-        vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, vertexShader));
+        vkinit::pipelineShaderStageCreateInfo(VK_SHADER_STAGE_VERTEX_BIT, vertexShader));
 
     shaderStages.push_back(
-        vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, fragmentShader));
+        vkinit::pipelineShaderStageCreateInfo(VK_SHADER_STAGE_FRAGMENT_BIT, fragmentShader));
 }
-void PipelineBuilder::set_input_topology(VkPrimitiveTopology topology)
+void PipelineBuilder::setInputTopology(VkPrimitiveTopology topology)
 {
     inputAssembly.topology = topology;
     // we are not going to use primitive restart on the entire tutorial so leave
@@ -113,19 +113,19 @@ void PipelineBuilder::set_input_topology(VkPrimitiveTopology topology)
     inputAssembly.primitiveRestartEnable = VK_FALSE;
 }
 
-void PipelineBuilder::set_polygon_mode(VkPolygonMode mode)
+void PipelineBuilder::setPolygonMode(VkPolygonMode mode)
 {
     rasterizer.polygonMode = mode;
     rasterizer.lineWidth = 1.f;
 }
 
-void PipelineBuilder::set_cull_mode(VkCullModeFlags cullMode, VkFrontFace frontFace)
+void PipelineBuilder::setCullMode(VkCullModeFlags cullMode, VkFrontFace frontFace)
 {
     rasterizer.cullMode = cullMode;
     rasterizer.frontFace = frontFace;
 }
 
-void PipelineBuilder::set_multisampling_none()
+void PipelineBuilder::setMultisamplingNone()
 {
     multisampling.sampleShadingEnable = VK_FALSE;
     // multisampling defaulted to no multisampling (1 sample per pixel)
@@ -137,7 +137,7 @@ void PipelineBuilder::set_multisampling_none()
     multisampling.alphaToOneEnable = VK_FALSE;
 }
 
-void PipelineBuilder::disable_blending()
+void PipelineBuilder::disableBlending()
 {
     // default write mask
     colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
@@ -145,7 +145,7 @@ void PipelineBuilder::disable_blending()
     colorBlendAttachment.blendEnable = VK_FALSE;
 }
 
-void PipelineBuilder::enable_blending_additive()
+void PipelineBuilder::enableBlendingAdditive()
 {
     colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     colorBlendAttachment.blendEnable = VK_TRUE;
@@ -157,7 +157,7 @@ void PipelineBuilder::enable_blending_additive()
     colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
 }
 
-void PipelineBuilder::enable_blending_alphablend()
+void PipelineBuilder::enableBlendingAlphaBlend()
 {
     colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     colorBlendAttachment.blendEnable = VK_TRUE;
@@ -169,7 +169,7 @@ void PipelineBuilder::enable_blending_alphablend()
     colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
 }
 
-void PipelineBuilder::set_color_attachment_format(VkFormat format)
+void PipelineBuilder::setColorAttachmentFormat(VkFormat format)
 {
     colorAttachmentformat = format;
     // connect the format to the renderInfo  structure
@@ -177,12 +177,12 @@ void PipelineBuilder::set_color_attachment_format(VkFormat format)
     renderInfo.pColorAttachmentFormats = &colorAttachmentformat;
 }
 
-void PipelineBuilder::set_depth_format(VkFormat format)
+void PipelineBuilder::setDepthFormat(VkFormat format)
 {
     renderInfo.depthAttachmentFormat = format;
 }
 
-void PipelineBuilder::disable_depthtest()
+void PipelineBuilder::disableDepthTest()
 {
     depthStencil.depthTestEnable = VK_FALSE;
     depthStencil.depthWriteEnable = VK_FALSE;
@@ -195,7 +195,7 @@ void PipelineBuilder::disable_depthtest()
     depthStencil.maxDepthBounds = 1.f;
 }
 
-void PipelineBuilder::enable_depthtest(bool depthWriteEnable, VkCompareOp op)
+void PipelineBuilder::enableDepthTest(bool depthWriteEnable, VkCompareOp op)
 {
     depthStencil.depthTestEnable = VK_TRUE;
     depthStencil.depthWriteEnable = depthWriteEnable;
@@ -208,7 +208,7 @@ void PipelineBuilder::enable_depthtest(bool depthWriteEnable, VkCompareOp op)
     depthStencil.maxDepthBounds = 1.f;
 }
 
-bool vkutil::load_shader_module(const char* filePath,
+bool vkutil::loadShaderModule(const char* filePath,
     VkDevice device,
     VkShaderModule* outShaderModule)
 {

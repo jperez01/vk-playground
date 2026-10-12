@@ -35,7 +35,7 @@ void GpuProfiler::destroy(VkDevice device)
     }
 }
 
-uint32_t GpuProfiler::query_index(uint32_t frameSlot, GpuPass pass, bool isEnd) const
+uint32_t GpuProfiler::queryIndex(uint32_t frameSlot, GpuPass pass, bool isEnd) const
 {
     return frameSlot * 2 * PassCount + (uint32_t)pass * 2 + (isEnd ? 1 : 0);
 }
@@ -84,36 +84,36 @@ void GpuProfiler::begin(VkCommandBuffer cmd, uint32_t frameSlot, GpuPass pass)
         };
         VkDebugUtilsLabelEXT label{};
         label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
-        label.pLabelName = pass_name(pass);
+        label.pLabelName = passName(pass);
         for (int i = 0; i < 4; i++) label.color[i] = colors[(uint32_t)pass][i];
         beginLabel(cmd, &label);
     }
     if (timestampsSupported) {
-        vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, queryPool, query_index(frameSlot, pass, false));
+        vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, queryPool, queryIndex(frameSlot, pass, false));
     }
 }
 
 void GpuProfiler::end(VkCommandBuffer cmd, uint32_t frameSlot, GpuPass pass)
 {
     if (timestampsSupported) {
-        vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, queryPool, query_index(frameSlot, pass, true));
+        vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, queryPool, queryIndex(frameSlot, pass, true));
     }
     if (endLabel) {
         endLabel(cmd);
     }
 }
 
-float GpuProfiler::pass_ms(GpuPass pass) const
+float GpuProfiler::passMs(GpuPass pass) const
 {
     return smoothedMs[(uint32_t)pass];
 }
 
-float GpuProfiler::total_ms() const
+float GpuProfiler::totalMs() const
 {
     return smoothedTotal;
 }
 
-const char* GpuProfiler::pass_name(GpuPass pass)
+const char* GpuProfiler::passName(GpuPass pass)
 {
     switch (pass) {
     case GpuPass::Background: return "Background";

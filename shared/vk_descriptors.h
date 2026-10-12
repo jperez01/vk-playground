@@ -9,7 +9,7 @@ struct DescriptorLayoutBuilder {
 
     std::vector<VkDescriptorSetLayoutBinding> bindings;
 
-    void add_binding(uint32_t binding, VkDescriptorType type, uint32_t count = 1);
+    void addBinding(uint32_t binding, VkDescriptorType type, uint32_t count = 1);
     void clear();
     VkDescriptorSetLayout build(VkDevice device, VkShaderStageFlags shaderStages, void* pNext = nullptr, VkDescriptorSetLayoutCreateFlags flags = 0);
 };
@@ -22,9 +22,9 @@ struct DescriptorAllocator {
 
     VkDescriptorPool pool;
 
-    void init_pool(VkDevice device, uint32_t maxSets, std::span<PoolSizeRatio> poolRatios);
-    void clear_descriptors(VkDevice device);
-    void destroy_pool(VkDevice device);
+    void initPool(VkDevice device, uint32_t maxSets, std::span<PoolSizeRatio> poolRatios);
+    void clearDescriptors(VkDevice device);
+    void destroyPool(VkDevice device);
 
     VkDescriptorSet allocate(VkDevice device, VkDescriptorSetLayout layout);
 };

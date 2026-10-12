@@ -84,9 +84,9 @@ struct DrawContext {
 
 struct EngineStats {
     float frametime;
-    int triangle_count;
-    int drawcall_count;
-    float geometry_record_time;
+    int triangleCount;
+    int drawcallCount;
+    float geometryRecordTime;
 };
 
 struct GLTFMetallic_Roughness {
@@ -94,8 +94,8 @@ struct GLTFMetallic_Roughness {
     MaterialPipeline transparentPipeline;
 
 
-    void build_pipelines(VulkanEngine* engine);
-    void clear_resources(VkDevice device);
+    void buildPipelines(VulkanEngine* engine);
+    void clearResources(VkDevice device);
 
 };
 
@@ -148,7 +148,7 @@ public:
 	VkDescriptorSetLayout drawImageDescriptorLayout;
     uint32_t globalTextureCount{ 0 };
     std::map<std::pair<VkImageView, VkSampler>, int> globalTextureSlots;
-    int add_global_texture(VkImageView view, VkSampler sampler);
+    int addGlobalTexture(VkImageView view, VkSampler sampler);
 
 
     VmaAllocator allocator; // vma lib allocator
@@ -209,14 +209,14 @@ public:
 
     // draw loop
     void draw();
-	void draw_main(VkCommandBuffer cmd);
-	void draw_imgui(VkCommandBuffer cmd, VkImageView targetImageView);
+	void drawMain(VkCommandBuffer cmd);
+	void drawImGui(VkCommandBuffer cmd, VkImageView targetImageView);
 
-	void render_nodes();
+	void renderNodes();
 
-    void draw_geometry(VkCommandBuffer cmd);
+    void drawGeometry(VkCommandBuffer cmd);
 
-    void update_scene(const glm::mat4& viewMatrix);
+    void updateScene(const glm::mat4& viewMatrix);
 	void sendModelDataToGpu(Model& model);
 
     // upload a mesh into a pair of gpu buffers. If descriptor allocator is not
@@ -224,51 +224,51 @@ public:
 	GPUMeshBuffers uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
 	GPUMeshBuffers uploadMesh(VkCommandBuffer cmd, std::vector<AllocatedBuffer>& stagingBuffers, std::span<uint32_t> indices, std::span<Vertex> vertices);
 	void handleImGui();
-	void resize_swapchain();
+	void resizeSwapchain();
 
-    FrameData& get_current_frame();
-    uint32_t get_current_frame_slot() const { return frameNumber % FRAME_OVERLAP; }
+    FrameData& getCurrentFrame();
+    uint32_t getCurrentFrameSlot() const { return frameNumber % FRAME_OVERLAP; }
 
-    AllocatedImage create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
-    AllocatedImage create_image(VkCommandBuffer cmd, std::vector<AllocatedBuffer>& stagingBuffers, void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
+    AllocatedImage createImage(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
+    AllocatedImage createImage(VkCommandBuffer cmd, std::vector<AllocatedBuffer>& stagingBuffers, void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
 
-    void defer_destroy(VkBuffer buffer, VmaAllocation allocation);
-    void defer_destroy(VkImage image, VkImageView view, VmaAllocation allocation);
-    void defer_destroy(VkSampler sampler);
+    void deferDestroy(VkBuffer buffer, VmaAllocation allocation);
+    void deferDestroy(VkImage image, VkImageView view, VmaAllocation allocation);
+    void deferDestroy(VkSampler sampler);
 
     PFN_vkCmdPushDescriptorSetKHR vkCmdPushDescriptorSetKHR;
 
-    void immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function);
+    void immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function);
 
     std::unordered_map<std::string, std::shared_ptr<LoadedGLTF>> loadedScenes;
 
     float renderScale = 1;
 
-    bool resize_requested{false};
+    bool resizeRequested{false};
     VkPresentModeKHR presentMode { VK_PRESENT_MODE_FIFO_KHR };
-    bool freeze_rendering{false};
+    bool freezeRendering{false};
 private:
-    void init_vulkan();
+    void initVulkan();
 
-    void init_swapchain();
+    void initSwapchain();
 
-    void create_swapchain(uint32_t width, uint32_t height);
+    void createSwapchain(uint32_t width, uint32_t height);
 
-    void destroy_swapchain();
+    void destroySwapchain();
 
-    void init_commands();
+    void initCommands();
 
-    void init_pipelines();
-    void init_background_pipelines();
-	void init_post_process_pipeline();
+    void initPipelines();
+    void initBackgroundPipelines();
+	void initPostProcessPipeline();
 
-    void init_descriptors();
+    void initDescriptors();
 
-    void init_sync_structures();
+    void initSyncStructures();
 
-    void init_renderables();
+    void initRenderables();
 
-    void init_imgui();
+    void initImGui();
 
-    void init_default_data();
+    void initDefaultData();
 };

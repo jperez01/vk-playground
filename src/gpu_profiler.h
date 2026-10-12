@@ -20,14 +20,14 @@ public:
     void end(VkCommandBuffer cmd, uint32_t frameSlot, GpuPass pass);
 
     bool supported() const { return timestampsSupported; }
-    float pass_ms(GpuPass pass) const;
-    float total_ms() const;
-    static const char* pass_name(GpuPass pass);
+    float passMs(GpuPass pass) const;
+    float totalMs() const;
+    static const char* passName(GpuPass pass);
 
 private:
     static constexpr uint32_t PassCount = (uint32_t)GpuPass::Count;
 
-    uint32_t query_index(uint32_t frameSlot, GpuPass pass, bool isEnd) const;
+    uint32_t queryIndex(uint32_t frameSlot, GpuPass pass, bool isEnd) const;
 
     bool timestampsSupported{ false };
     VkQueryPool queryPool{ VK_NULL_HANDLE };
