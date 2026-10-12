@@ -82,6 +82,7 @@ public:
     VkDebugUtilsMessengerEXT debug_messenger;
     VkPhysicalDevice chosenGPU;
     VkDevice device;
+    float maxSamplerAnisotropy { 0.f };
 
     VkQueue graphicsQueue;
     uint32_t graphicsQueueFamily;
@@ -182,6 +183,9 @@ public:
     VkPresentModeKHR presentMode { VK_PRESENT_MODE_FIFO_KHR };
     bool freezeRendering{false};
 private:
+    std::vector<uint32_t> opaqueDrawIndices;
+    std::vector<std::pair<float, uint32_t>> transparentDraws;
+
     void updateScene(const glm::mat4& viewMatrix);
     bool beginFrame(uint32_t& swapchainImageIndex);
     VkCommandBuffer beginCommandBuffer();

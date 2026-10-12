@@ -14,10 +14,11 @@ Status key: ✅ merged · 🚧 in progress · ⬜ planned
 | #12 | Adds the README. Removes dead shaders, dead code and tutorial markers. Shader and asset paths are defined in CMake. Functions and members use camelCase. |
 | #13 | `UploadBatch` and `UploadContext` replace the duplicated upload helpers. Imported models load as a regular `LoadedScene`. `draw()` is split into named passes. The bindless binding uses `UPDATE_AFTER_BIND`. `loadModel` lives in `vk_loader`. |
 | #14 | Fixes in the glTF loader: name collisions, textures without samplers, and primitives without materials. Render targets are recreated on resize. Embedded Assimp textures load. |
+| #15 | PR B: dead code removed, `createComputePipeline` added, `vkutil` consolidated in `shared/`, `MeshPipelines` rename, a timeline-based `DeletionQueue` (removes the engine singleton), scene types gathered in `scene.h`, and the draw list built after the UI. |
 
-## PR B: simpler code and dependencies 🚧
+## PR B: simpler code and dependencies ✅
 
-Branch `simplify-structure`. This PR should not change behavior, except for the two bug fixes marked **(bug)**.
+Merged as #15. This PR should not change behavior, except for the two bug fixes marked **(bug)**.
 
 | # | Change | Why |
 |---|---|---|
@@ -29,7 +30,9 @@ Branch `simplify-structure`. This PR should not change behavior, except for the 
 | B6 | Gather the scene types (`Bounds`, `GeoSurface`, `MeshAsset`, `GLTFMaterial`, `Node`, `MeshNode`, `RenderObject`, `DrawContext`, `LoadedScene`) into `src/scene.h/.cpp` and drop `IRenderable`. `vk_types.h` keeps only GPU resource and layout types, and `vk_loader.h` only declares `loadGltf` and `loadModel`. | Today these types are spread across `vk_types.h`, `vk_engine.h` and `vk_loader.h`. |
 | B7 | Build the draw list (`updateScene`) after the UI has run each frame, not before it. **(bug)** | Today, loading a model whose path is already loaded frees the old scene after `updateScene` has stored raw pointers to its materials, and `drawGeometry` then dereferences them. |
 
-## PR A: frame optimizations ⬜
+## PR A: frame optimizations
+
+A4–A7 🚧 are on branch `frame-optimizations`. A1–A3 ⬜ come next.
 
 Measure each change with the GPU timings in the **Stats** window, comparing before and after.
 
@@ -41,7 +44,7 @@ Measure each change with the GPU timings in the **Stats** window, comparing befo
 | A4 | Cull with the bounding sphere (`bounds.sphereRadius`) against six frustum planes extracted once per frame, instead of projecting 8 corners per object. Reuse the draw-list vectors instead of allocating them every frame. | Lower CPU record time. |
 | A5 | Sort transparent surfaces back to front. **(bug)** | Correct blending. |
 | A6 | Use `UINT64_MAX` as the frame-wait timeout. Today a 1-second `VK_CHECK` timeout aborts on a long GPU hitch. **(bug)** | No abort when the GPU stalls. |
-| A7 | Enable anisotropic filtering on texture samplers. | Sharper textures at grazing angles, at almost no cost. |
+| A7 | Enable anisotropic filtering on texture samplers, if the GPU supports it, up to 16×. Give `defaultSamplerLinear` real mip levels (it had `maxLod = 0`, so every texture it sampled used only mip 0). When a glTF sampler leaves its filter unspecified, use linear filtering with trilinear mips instead of nearest. | Sharper textures at grazing angles, at almost no cost. Imported models get mipmapped sampling. |
 
 ## PR C: split the engine ⬜
 
