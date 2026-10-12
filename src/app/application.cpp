@@ -37,13 +37,13 @@ void Application::run() {
             if (e.type == SDL_WINDOWEVENT) {
 
 				if (e.window.event == SDL_WINDOWEVENT_RESIZED) {
-                    engine.resize_requested = true;
+                    engine.resizeRequested = true;
 				}
 				if (e.window.event == SDL_WINDOWEVENT_MINIMIZED) {
-					freeze_rendering = true;
+					freezeRendering = true;
 				}
 				if (e.window.event == SDL_WINDOWEVENT_RESTORED) {
-					freeze_rendering = false;
+					freezeRendering = false;
 				}
             }
 
@@ -51,10 +51,10 @@ void Application::run() {
         	ImGui_ImplSDL2_ProcessEvent(&e);
         }
 
-        if (freeze_rendering) continue;
+        if (freezeRendering) continue;
 
     	mainCamera.update();
-    	engine.update_scene(mainCamera.getViewMatrix());
+    	engine.updateScene(mainCamera.getViewMatrix());
     	engine.run();
     }
 }

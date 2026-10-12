@@ -1,6 +1,4 @@
-// vulkan_guide.h : Include file for standard system include files,
-// or project specific include files.
-//> intro
+// Core GPU resource types (RAII buffers/images), vertex/material layouts and the scene node.
 #pragma once
 
 #include <memory>
@@ -20,14 +18,13 @@
 
 #include <glm/mat4x4.hpp>
 #include <glm/vec4.hpp>
-//< intro 
 
 
 
 // forward declarations for RAII cleanup
 namespace vkutil {
-    void defer_destroy_buffer(VkBuffer buffer, VmaAllocation allocation);
-    void defer_destroy_image(VkImage image, VkImageView view, VmaAllocation allocation);
+    void deferDestroyBuffer(VkBuffer buffer, VmaAllocation allocation);
+    void deferDestroyImage(VkImage image, VkImageView view, VmaAllocation allocation);
 }
 
 // we will add our main reusable types here
@@ -41,7 +38,7 @@ struct AllocatedImage {
     AllocatedImage() = default;
     ~AllocatedImage() {
         if (image != VK_NULL_HANDLE || imageView != VK_NULL_HANDLE || allocation != VK_NULL_HANDLE) {
-            vkutil::defer_destroy_image(image, imageView, allocation);
+            vkutil::deferDestroyImage(image, imageView, allocation);
         }
     }
 
@@ -56,7 +53,7 @@ struct AllocatedImage {
     AllocatedImage& operator=(AllocatedImage&& other) noexcept {
         if (this != &other) {
             if (image != VK_NULL_HANDLE || imageView != VK_NULL_HANDLE || allocation != VK_NULL_HANDLE) {
-                vkutil::defer_destroy_image(image, imageView, allocation);
+                vkutil::deferDestroyImage(image, imageView, allocation);
             }
             image = other.image;
             imageView = other.imageView;
@@ -80,7 +77,7 @@ struct AllocatedBuffer {
     AllocatedBuffer() = default;
     ~AllocatedBuffer() {
         if (buffer != VK_NULL_HANDLE || allocation != VK_NULL_HANDLE) {
-            vkutil::defer_destroy_buffer(buffer, allocation);
+            vkutil::deferDestroyBuffer(buffer, allocation);
         }
     }
 
@@ -94,7 +91,7 @@ struct AllocatedBuffer {
     AllocatedBuffer& operator=(AllocatedBuffer&& other) noexcept {
         if (this != &other) {
             if (buffer != VK_NULL_HANDLE || allocation != VK_NULL_HANDLE) {
-                vkutil::defer_destroy_buffer(buffer, allocation);
+                vkutil::deferDestroyBuffer(buffer, allocation);
             }
             buffer = other.buffer;
             allocation = other.allocation;
@@ -125,7 +122,6 @@ struct GPUSceneData {
     glm::vec4 sunlightColor = {1.0f, 1.0f, 1.0f, 0.0f};
 };
 
-//> mat_types
 enum class MaterialPass :uint8_t {
     MainColor,
     Transparent,
@@ -140,8 +136,6 @@ struct MaterialInstance {
     VkDeviceAddress materialBuffer;
     MaterialPass passType;
 };
-//< mat_types
-//> vbuf_types
 struct Vertex {
 
 	glm::vec3 position;
@@ -165,9 +159,7 @@ struct GPUDrawPushConstants {
     VkDeviceAddress vertexBuffer;
     VkDeviceAddress materialBuffer;
 };
-//< vbuf_types
 
-//> node_types
 struct DrawContext;
 
 // base class for a renderable dynamic object
@@ -205,8 +197,6 @@ struct Node : public IRenderable {
     }
 };
 
-//< node_types
-//> intro
 #define VK_CHECK(x)                                                     \
     do {                                                                \
         VkResult err = x;                                               \
@@ -215,4 +205,3 @@ struct Node : public IRenderable {
             abort();                                                    \
         }                                                               \
     } while (0)
-//< intro

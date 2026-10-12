@@ -24,6 +24,7 @@ find_package(assimp CONFIG REQUIRED)
 find_package(nfd CONFIG REQUIRED)
 
 set_property(TARGET demo PROPERTY CXX_STANDARD 20)
+target_compile_definitions(demo PRIVATE ASSET_DIR="${PROJECT_SOURCE_DIR}/assets/")
 set_property(TARGET demo PROPERTY VS_DEBUGGER_WORKING_DIRECTORY $<TARGET_FILE_DIR:demo>)
 
 target_include_directories(demo PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")

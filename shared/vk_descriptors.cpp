@@ -1,8 +1,7 @@
 #include <vk_descriptors.h>
 #include "vk_initializers.h"
 
-//> descriptor_bind
-void DescriptorLayoutBuilder::add_binding(uint32_t binding, VkDescriptorType type, uint32_t count)
+void DescriptorLayoutBuilder::addBinding(uint32_t binding, VkDescriptorType type, uint32_t count)
 {
     VkDescriptorSetLayoutBinding newbind {};
     newbind.binding = binding;
@@ -16,9 +15,7 @@ void DescriptorLayoutBuilder::clear()
 {
     bindings.clear();
 }
-//< descriptor_bind
 
-//> descriptor_layout
 VkDescriptorSetLayout DescriptorLayoutBuilder::build(VkDevice device, VkShaderStageFlags shaderStages, void* pNext, VkDescriptorSetLayoutCreateFlags flags)
 {
     for (auto& b : bindings) {
@@ -37,10 +34,8 @@ VkDescriptorSetLayout DescriptorLayoutBuilder::build(VkDevice device, VkShaderSt
 
     return set;
 }
-//< descriptor_layout
 
-//> descriptor_pool_init
-void DescriptorAllocator::init_pool(VkDevice device, uint32_t maxSets, std::span<PoolSizeRatio> poolRatios)
+void DescriptorAllocator::initPool(VkDevice device, uint32_t maxSets, std::span<PoolSizeRatio> poolRatios)
 {
     std::vector<VkDescriptorPoolSize> poolSizes;
     for (PoolSizeRatio ratio : poolRatios) {
@@ -59,17 +54,15 @@ void DescriptorAllocator::init_pool(VkDevice device, uint32_t maxSets, std::span
 	vkCreateDescriptorPool(device, &pool_info, nullptr, &pool);
 }
 
-void DescriptorAllocator::clear_descriptors(VkDevice device)
+void DescriptorAllocator::clearDescriptors(VkDevice device)
 {
     vkResetDescriptorPool(device, pool, 0);
 }
 
-void DescriptorAllocator::destroy_pool(VkDevice device)
+void DescriptorAllocator::destroyPool(VkDevice device)
 {
     vkDestroyDescriptorPool(device,pool,nullptr);
 }
-//< descriptor_pool_init
-//> descriptor_alloc
 VkDescriptorSet DescriptorAllocator::allocate(VkDevice device, VkDescriptorSetLayout layout)
 {
     VkDescriptorSetAllocateInfo allocInfo = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
@@ -83,4 +76,3 @@ VkDescriptorSet DescriptorAllocator::allocate(VkDevice device, VkDescriptorSetLa
 
     return ds;
 }
-//< descriptor_alloc
