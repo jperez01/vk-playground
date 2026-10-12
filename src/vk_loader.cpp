@@ -169,7 +169,7 @@ std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::
         return {};
     }
 
-    UploadBatch batch(*engine);
+    UploadBatch batch(engine->uploadContext);
 
     // we can stimate the descriptors we will need accurately
 
@@ -466,7 +466,7 @@ std::optional<std::shared_ptr<LoadedScene>> loadModel(VulkanEngine* engine, cons
     auto scene = std::make_shared<LoadedScene>();
     scene->creator = engine;
 
-    UploadBatch batch(*engine);
+    UploadBatch batch(engine->uploadContext);
 
     for (auto& [path, textureInfo] : model.alreadyLoadedImages) {
         VkExtent3D extent = { (uint32_t)textureInfo.width, (uint32_t)textureInfo.height, 1 };

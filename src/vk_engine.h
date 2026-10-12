@@ -17,6 +17,7 @@
  
 #include <camera.h>
 #include "gpu_profiler.h"
+#include "upload_batch.h"
 #include <vk_descriptors.h>
 #include <vk_loader.h>
 #include <vk_pipelines.h>
@@ -163,11 +164,7 @@ public:
 	VkSemaphore timelineSemaphore {VK_NULL_HANDLE};
 	uint64_t timelineValue {0};
 
-    // immediate submit structures (used through UploadBatch)
-    bool uploadBatchOpen { false };
-    VkFence immFence;
-    VkCommandBuffer immCommandBuffer;
-    VkCommandPool immCommandPool;
+    UploadContext uploadContext;
 
 	AllocatedImage whiteImage;
 	AllocatedImage blackImage;

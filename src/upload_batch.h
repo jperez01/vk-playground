@@ -1,4 +1,4 @@
-// Records GPU uploads (meshes, textures) into the engine's immediate command buffer
+// Records GPU uploads (meshes, textures) into the upload context's command buffer
 // and submits them together with a single wait. Staging buffers live until the submit completes.
 
 #pragma once
@@ -8,11 +8,20 @@
 #include <span>
 #include <vector>
 
-class VulkanEngine;
+// Vulkan objects an UploadBatch records and submits with. Owned by VulkanEngine.
+struct UploadContext {
+    VkDevice device { VK_NULL_HANDLE };
+    VmaAllocator allocator { VK_NULL_HANDLE };
+    VkQueue queue { VK_NULL_HANDLE };
+    VkCommandPool commandPool { VK_NULL_HANDLE };
+    VkCommandBuffer commandBuffer { VK_NULL_HANDLE };
+    VkFence fence { VK_NULL_HANDLE };
+    bool batchOpen { false };
+};
 
 class UploadBatch {
 public:
-    explicit UploadBatch(VulkanEngine& engine);
+    explicit UploadBatch(UploadContext& context);
     ~UploadBatch();
     UploadBatch(const UploadBatch&) = delete;
     UploadBatch& operator=(const UploadBatch&) = delete;
@@ -22,7 +31,7 @@ public:
     void submitAndWait();
 
 private:
-    VulkanEngine& engine;
+    UploadContext& context;
     VkCommandBuffer cmd;
     std::vector<AllocatedBuffer> stagingBuffers;
     bool submitted { false };

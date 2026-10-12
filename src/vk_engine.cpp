@@ -72,7 +72,7 @@ void VulkanEngine::init()
 }
 
 void VulkanEngine::initDefaultData() {
-	UploadBatch batch(*this);
+	UploadBatch batch(uploadContext);
 
 	//3 default textures, white, grey, black. 1 pixel each
 	uint32_t white = glm::packUnorm4x8(glm::vec4(1, 1, 1, 1));
@@ -144,9 +144,9 @@ void VulkanEngine::cleanup()
 	}
 	vkDestroySemaphore(device, timelineSemaphore, nullptr);
 
-	vkDestroyCommandPool(device, immCommandPool, nullptr);
+	vkDestroyCommandPool(device, uploadContext.commandPool, nullptr);
 	gpuProfiler.destroy(device);
-	vkDestroyFence(device, immFence, nullptr);
+	vkDestroyFence(device, uploadContext.fence, nullptr);
 
 	if (defaultSamplerLinear != VK_NULL_HANDLE) {
 		vkDestroySampler(device, defaultSamplerLinear, nullptr);
@@ -864,6 +864,10 @@ void VulkanEngine::initVulkan()
     allocatorInfo.instance = instance;
     allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
     vmaCreateAllocator(&allocatorInfo, &allocator);
+
+    uploadContext.device = device;
+    uploadContext.allocator = allocator;
+    uploadContext.queue = graphicsQueue;
 }
 
 void VulkanEngine::initSwapchain()
@@ -1012,12 +1016,12 @@ void VulkanEngine::initCommands()
 
     }
 
-    VK_CHECK(vkCreateCommandPool(device, &commandPoolInfo, nullptr, &immCommandPool));
+    VK_CHECK(vkCreateCommandPool(device, &commandPoolInfo, nullptr, &uploadContext.commandPool));
 
     // allocate the default command buffer that we will use for rendering
-    VkCommandBufferAllocateInfo cmdAllocInfo = vkinit::commandBufferAllocateInfo(immCommandPool, 1);
+    VkCommandBufferAllocateInfo cmdAllocInfo = vkinit::commandBufferAllocateInfo(uploadContext.commandPool, 1);
 
-    VK_CHECK(vkAllocateCommandBuffers(device, &cmdAllocInfo, &immCommandBuffer));
+    VK_CHECK(vkAllocateCommandBuffers(device, &cmdAllocInfo, &uploadContext.commandBuffer));
 
 }
 
@@ -1029,7 +1033,7 @@ void VulkanEngine::initSyncStructures()
     // we want the fence to start signalled so we can wait on it on the first
     // frame
     VkFenceCreateInfo fenceCreateInfo = vkinit::fenceCreateInfo(VK_FENCE_CREATE_SIGNALED_BIT);
-    VK_CHECK(vkCreateFence(device, &fenceCreateInfo, nullptr, &immFence));
+    VK_CHECK(vkCreateFence(device, &fenceCreateInfo, nullptr, &uploadContext.fence));
 
     VkSemaphoreTypeCreateInfo timelineCreateInfo{};
     timelineCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
