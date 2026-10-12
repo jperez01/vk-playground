@@ -1,66 +1,15 @@
-// glTF scene loading (fastgltf) into GPU meshes, materials and a node hierarchy.
+// glTF and Assimp scene loading into GPU meshes, materials and a node hierarchy.
 
 #pragma once
 
-#include <vk_types.h>
+#include "scene.h"
 
-#include "vk_descriptors.h"
-#include <unordered_map>
-#include <filesystem>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
 
 class VulkanEngine;
-
-struct Bounds {
-    glm::vec3 origin;
-    float sphereRadius;
-    glm::vec3 extents;
-};
-
-struct GLTFMaterial {
-    MaterialInstance data;
-};
-
-struct GeoSurface {
-    uint32_t startIndex;
-    uint32_t count;
-    Bounds bounds;
-	std::shared_ptr<GLTFMaterial> material;
-};
-
-struct MeshAsset {
-    std::string name;
-
-   
-    std::vector<GeoSurface> surfaces;
-    std::shared_ptr<GPUMeshBuffers> meshBuffers;
-};
-
-struct LoadedScene : public IRenderable {
-
-    // storage for all the data on a given gltf file
-    std::unordered_map<std::string, std::shared_ptr<MeshAsset>> meshes;
-    std::unordered_map<std::string, std::shared_ptr<Node>> nodes;
-    std::unordered_map<std::string, AllocatedImage> images;
-    std::unordered_map<std::string, std::shared_ptr<GLTFMaterial>> materials;
-
-    // nodes that dont have a parent, for iterating through the file in tree order
-    std::vector<std::shared_ptr<Node>> topNodes;
-
-    std::vector<VkSampler> samplers;
-
-
-    AllocatedBuffer materialDataBuffer;
-
-    VulkanEngine* creator;
-
-    ~LoadedScene() { clearAll(); };
-
-    virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx);
-
-private:
-
-    void clearAll();
-};
 
 std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::string_view filePath);
 

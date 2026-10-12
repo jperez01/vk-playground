@@ -31,19 +31,8 @@ constexpr bool bUseValidationLayers = false;
 constexpr bool bUseValidationLayers = true;
 #endif
 
-VulkanEngine* loadedEngine = nullptr;
-
-VulkanEngine& VulkanEngine::Get()
-{
-    return *loadedEngine;
-}
-
 void VulkanEngine::init()
 {
-    // only one engine initialization is allowed with the application.
-    assert(loadedEngine == nullptr);
-    loadedEngine = this;
-
     // We initialize SDL and create a window with it.
     SDL_Init(SDL_INIT_VIDEO);
 
@@ -131,8 +120,8 @@ void VulkanEngine::cleanup()
 
     for (auto& frame : frames) {
         frame.sceneDataBuffer = {};
-        frame.garbage.flush(device, allocator);
     }
+    deletionQueue.flushAll(device, allocator);
 
 	ImGui_ImplVulkan_Shutdown();
 	ImGui_ImplSDL2_Shutdown();
@@ -174,6 +163,7 @@ void VulkanEngine::cleanup()
 
     vkDestroySurfaceKHR(instance, surface, nullptr);
 
+    vkutil::setDeletionQueue(nullptr);
     vmaDestroyAllocator(allocator);
 
     vkDestroyDevice(device, nullptr);
@@ -227,59 +217,6 @@ void VulkanEngine::initBackgroundPipelines()
 }
 
 
-namespace vkutil {
-    void deferDestroyBuffer(VkBuffer buffer, VmaAllocation allocation) {
-        VulkanEngine::Get().deferDestroy(buffer, allocation);
-    }
-    void deferDestroyImage(VkImage image, VkImageView view, VmaAllocation allocation) {
-        VulkanEngine::Get().deferDestroy(image, view, allocation);
-    }
-}
-
-void FrameGarbage::flush(VkDevice device, VmaAllocator allocator) {
-    // 1. Destroy Views (Child of Image)
-    for (auto view : imageViews) {
-        vkDestroyImageView(device, view, nullptr);
-    }
-    // 2. Destroy Images (Bound to Memory)
-    for (auto image : images) {
-        vkDestroyImage(device, image, nullptr);
-    }
-    // 3. Destroy Buffers (Bound to Memory)
-    for (auto buffer : buffers) {
-        vkDestroyBuffer(device, buffer, nullptr);
-    }
-    // 4. Free the actual Device Memory
-    for (auto alloc : allocations) {
-        vmaFreeMemory(allocator, alloc);
-    }
-    // 5. Samplers (Independent)
-    for (auto sampler : samplers) {
-        vkDestroySampler(device, sampler, nullptr);
-    }
-    
-    buffers.clear();
-    allocations.clear();
-    images.clear();
-    imageViews.clear();
-    samplers.clear();
-}
-
-void VulkanEngine::deferDestroy(VkBuffer buffer, VmaAllocation allocation) {
-    getCurrentFrame().garbage.buffers.push_back(buffer);
-    getCurrentFrame().garbage.allocations.push_back(allocation);
-}
-
-void VulkanEngine::deferDestroy(VkImage image, VkImageView view, VmaAllocation allocation) {
-    getCurrentFrame().garbage.images.push_back(image);
-    getCurrentFrame().garbage.imageViews.push_back(view);
-    getCurrentFrame().garbage.allocations.push_back(allocation);
-}
-
-void VulkanEngine::deferDestroy(VkSampler sampler) {
-    getCurrentFrame().garbage.samplers.push_back(sampler);
-}
-
 bool VulkanEngine::beginFrame(uint32_t& swapchainImageIndex)
 {
 	// Wait for the submit that last used this frame slot (FRAME_OVERLAP frames ago),
@@ -300,7 +237,9 @@ bool VulkanEngine::beginFrame(uint32_t& swapchainImageIndex)
 	const uint32_t slot = getCurrentFrameSlot();
 	gpuProfiler.collect(device, slot);
 
-	getCurrentFrame().garbage.flush(device, allocator);
+	uint64_t completedValue = 0;
+	VK_CHECK(vkGetSemaphoreCounterValue(device, timelineSemaphore, &completedValue));
+	deletionQueue.collect(device, allocator, completedValue);
 
 	VkResult e = vkAcquireNextImageKHR(device, swapchain, 1000000000, getCurrentFrame().swapchainSemaphore, nullptr, &swapchainImageIndex);
 	if (e == VK_ERROR_OUT_OF_DATE_KHR) {
@@ -522,6 +461,7 @@ void VulkanEngine::submitAndPresent(VkCommandBuffer cmd, uint32_t swapchainImage
 	VkSubmitInfo2 submit = vkinit::submitInfo(&cmdinfo, 2, signalInfos, 1, &waitInfo);
 
 	VK_CHECK(vkQueueSubmit2(graphicsQueue, 1, &submit, VK_NULL_HANDLE));
+	deletionQueue.setPendingValue(timelineValue + 1);
 
 	// present the image we just rendered to, waiting on its render semaphore
 	// so drawing commands have finished before the image is displayed to the user
@@ -708,13 +648,15 @@ void VulkanEngine::drawGeometry(VkCommandBuffer cmd)
     drawCommands.TransparentSurfaces.clear();
 }
 
-void VulkanEngine::run()
+void VulkanEngine::run(const glm::mat4& viewMatrix)
 {
 	auto start = std::chrono::steady_clock::now();
 	if (resizeRequested) {
 		resizeSwapchain();
 	}
 	handleImGui();
+
+	updateScene(viewMatrix);
 
 	draw();
 
@@ -736,6 +678,9 @@ void VulkanEngine::updateScene(const glm::mat4& viewMatrix)
 	sceneData.view = viewMatrix;
 	sceneData.proj = projection;
 	sceneData.viewproj = projection * viewMatrix;
+
+    drawCommands.OpaqueSurfaces.clear();
+    drawCommands.TransparentSurfaces.clear();
 
     for (auto& [name, scene] : loadedScenes) {
         scene->Draw(glm::mat4{ 1.f }, drawCommands);
@@ -832,6 +777,7 @@ void VulkanEngine::initVulkan()
     allocatorInfo.instance = instance;
     allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
     vmaCreateAllocator(&allocatorInfo, &allocator);
+    vkutil::setDeletionQueue(&deletionQueue);
 
     uploadContext.device = device;
     uploadContext.allocator = allocator;
@@ -1343,30 +1289,6 @@ void MeshPipelines::clearResources(VkDevice device)
 	transparentPipeline.layout = VK_NULL_HANDLE;
 }
 
-void MeshNode::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
-{
-    glm::mat4 nodeMatrix = topMatrix * worldTransform;
-
-    for (auto& s : mesh->surfaces) {
-        RenderObject def;
-        def.indexCount = s.count;
-        def.firstIndex = s.startIndex;
-        def.indexBuffer = mesh->meshBuffers->indexBuffer.buffer;
-        def.material = &s.material->data;
-        def.bounds = s.bounds;
-        def.transform = nodeMatrix;
-        def.vertexBufferAddress = mesh->meshBuffers->vertexBufferAddress;
-
-        if (s.material->data.passType == MaterialPass::Transparent) {
-            ctx.TransparentSurfaces.push_back(def);
-        } else {
-            ctx.OpaqueSurfaces.push_back(def);
-        }
-    }
-
-    // recurse down
-    Node::Draw(topMatrix, ctx);
-}
 int VulkanEngine::addGlobalTexture(VkImageView view, VkSampler sampler)
 {
     auto existing = globalTextureSlots.find({ view, sampler });

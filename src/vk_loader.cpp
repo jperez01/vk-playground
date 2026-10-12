@@ -144,7 +144,6 @@ std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::
     fmt::print("Loading GLTF: {}", filePath);
 
     std::shared_ptr<LoadedScene> scene = std::make_shared<LoadedScene>();
-    scene->creator = engine;
     LoadedScene& file = *scene.get();
 
     fastgltf::Parser parser {};
@@ -475,28 +474,12 @@ std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::
     return scene;
 }
 
-void LoadedScene::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
-{
-    // create renderables from the scenenodes
-    for (auto& n : topNodes) {
-        n->Draw(topMatrix, ctx);
-    }
-}
-
-void LoadedScene::clearAll()
-{
-    for (auto& sampler : samplers) {
-        creator->deferDestroy(sampler);
-    }
-}
-
 std::optional<std::shared_ptr<LoadedScene>> loadModel(VulkanEngine* engine, const std::string& filePath)
 {
     Model model(filePath);
     if (!model.loaded) return {};
 
     auto scene = std::make_shared<LoadedScene>();
-    scene->creator = engine;
 
     UploadBatch batch(engine->uploadContext);
 

@@ -11,6 +11,8 @@ add_executable (demo
 
   vk_loader.h
   vk_loader.cpp
+  scene.h
+  scene.cpp
   model/model.cpp
   model/model.h
         app/application.cpp

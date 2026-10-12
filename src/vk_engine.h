@@ -13,10 +13,11 @@
 #include <vk_mem_alloc.h>
  
 #include <camera.h>
+#include "scene.h"
 #include "gpu_profiler.h"
 #include "upload_batch.h"
+#include <vk_deletion_queue.h>
 #include <vk_descriptors.h>
-#include <vk_loader.h>
 #include <vk_pipelines.h>
 
 struct ComputePushConstants {
@@ -35,31 +36,9 @@ struct ComputeEffect {
 	ComputePushConstants data;
 };
 
-struct RenderObject {
-    uint32_t indexCount;
-    uint32_t firstIndex;
-    VkBuffer indexBuffer;
-    
-    MaterialInstance* material;
-    Bounds bounds;
-    glm::mat4 transform;
-    VkDeviceAddress vertexBufferAddress;
-};
-
-struct FrameGarbage {
-    std::vector<VkBuffer> buffers;
-    std::vector<VmaAllocation> allocations;
-    std::vector<VkImage> images;
-    std::vector<VkImageView> imageViews;
-    std::vector<VkSampler> samplers;
-
-    void flush(VkDevice device, VmaAllocator allocator);
-};
-
 struct FrameData {
 	VkSemaphore swapchainSemaphore;
 	uint64_t frameTimelineValue {0};
-    FrameGarbage garbage;
     AllocatedBuffer sceneDataBuffer;
     VkDescriptorSet globalDescriptor;
 
@@ -71,17 +50,14 @@ constexpr unsigned int FRAME_OVERLAP = 2;
 constexpr uint32_t MAX_GLOBAL_TEXTURES = 1000;
 
 
-struct DrawContext {
-    std::vector<RenderObject> OpaqueSurfaces;
-    std::vector<RenderObject> TransparentSurfaces;
-};
-
 struct EngineStats {
     float frametime;
     int triangleCount;
     int drawcallCount;
     float geometryRecordTime;
 };
+
+class VulkanEngine;
 
 // Opaque and transparent mesh pipelines shared by glTF and Assimp scenes.
 struct MeshPipelines {
@@ -92,13 +68,6 @@ struct MeshPipelines {
     void buildPipelines(VulkanEngine* engine);
     void clearResources(VkDevice device);
 
-};
-
-struct MeshNode : public Node {
-
-	std::shared_ptr<MeshAsset> mesh;
-
-	virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx) override;
 };
 
 class VulkanEngine {
@@ -162,6 +131,8 @@ public:
 	VkSemaphore timelineSemaphore {VK_NULL_HANDLE};
 	uint64_t timelineValue {0};
 
+    DeletionQueue deletionQueue;
+
     UploadContext uploadContext;
 
 	AllocatedImage whiteImage;
@@ -181,14 +152,11 @@ public:
 	std::vector<ComputeEffect> backgroundEffects;
 	int currentBackgroundEffect{ 0 };
 
-    // singleton style getter.multiple engines is not supported
-    static VulkanEngine& Get();
-
     // initializes everything in the engine
     void init();
 
 	// run rendering code
-	void run();
+	void run(const glm::mat4& viewMatrix);
 
     // shuts down the engine
     void cleanup();
@@ -198,17 +166,11 @@ public:
 
     void drawGeometry(VkCommandBuffer cmd);
 
-    void updateScene(const glm::mat4& viewMatrix);
-
 	void handleImGui();
 	void resizeSwapchain();
 
     FrameData& getCurrentFrame();
     uint32_t getCurrentFrameSlot() const { return frameNumber % FRAME_OVERLAP; }
-
-    void deferDestroy(VkBuffer buffer, VmaAllocation allocation);
-    void deferDestroy(VkImage image, VkImageView view, VmaAllocation allocation);
-    void deferDestroy(VkSampler sampler);
 
     PFN_vkCmdPushDescriptorSetKHR vkCmdPushDescriptorSetKHR;
 
@@ -220,6 +182,7 @@ public:
     VkPresentModeKHR presentMode { VK_PRESENT_MODE_FIFO_KHR };
     bool freezeRendering{false};
 private:
+    void updateScene(const glm::mat4& viewMatrix);
     bool beginFrame(uint32_t& swapchainImageIndex);
     VkCommandBuffer beginCommandBuffer();
     void recordBackgroundPass(VkCommandBuffer cmd);
