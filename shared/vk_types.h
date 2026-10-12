@@ -1,6 +1,4 @@
-// vulkan_guide.h : Include file for standard system include files,
-// or project specific include files.
-//> intro
+// Core GPU resource types (RAII buffers/images), vertex/material layouts and the scene node.
 #pragma once
 
 #include <memory>
@@ -20,7 +18,6 @@
 
 #include <glm/mat4x4.hpp>
 #include <glm/vec4.hpp>
-//< intro 
 
 
 
@@ -125,7 +122,6 @@ struct GPUSceneData {
     glm::vec4 sunlightColor = {1.0f, 1.0f, 1.0f, 0.0f};
 };
 
-//> mat_types
 enum class MaterialPass :uint8_t {
     MainColor,
     Transparent,
@@ -140,8 +136,6 @@ struct MaterialInstance {
     VkDeviceAddress materialBuffer;
     MaterialPass passType;
 };
-//< mat_types
-//> vbuf_types
 struct Vertex {
 
 	glm::vec3 position;
@@ -165,9 +159,7 @@ struct GPUDrawPushConstants {
     VkDeviceAddress vertexBuffer;
     VkDeviceAddress materialBuffer;
 };
-//< vbuf_types
 
-//> node_types
 struct DrawContext;
 
 // base class for a renderable dynamic object
@@ -205,8 +197,6 @@ struct Node : public IRenderable {
     }
 };
 
-//< node_types
-//> intro
 #define VK_CHECK(x)                                                     \
     do {                                                                \
         VkResult err = x;                                               \
@@ -215,4 +205,3 @@ struct Node : public IRenderable {
             abort();                                                    \
         }                                                               \
     } while (0)
-//< intro

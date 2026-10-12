@@ -18,6 +18,7 @@ add_library (vkguide_shared STATIC
 
 set_property(TARGET vkguide_shared PROPERTY CXX_STANDARD 20)
 target_compile_definitions(vkguide_shared PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
+target_compile_definitions(vkguide_shared PUBLIC SHADER_DIR="${PROJECT_SOURCE_DIR}/spirv/")
 
 target_include_directories(vkguide_shared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 

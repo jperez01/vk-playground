@@ -1,5 +1,4 @@
-// vulkan_guide.h : Include file for standard system include files,
-// or project specific include files.
+// VulkanEngine: owns the Vulkan device, swapchain, per-frame resources and the frame loop.
 
 #pragma once
 
@@ -24,12 +23,7 @@
 
 #include "model/model.h"
 
-struct MeshAsset;
-namespace fastgltf {
-struct Mesh;
-}
 class Model;
-
 
 struct ComputePushConstants {
 	glm::vec4 data1;
@@ -69,7 +63,7 @@ struct FrameGarbage {
 };
 
 struct FrameData {
-	VkSemaphore swapchainSemaphore, renderSemaphore;
+	VkSemaphore swapchainSemaphore;
 	uint64_t frameTimelineValue {0};
     FrameGarbage garbage;
     AllocatedBuffer sceneDataBuffer;
@@ -100,26 +94,9 @@ struct GLTFMetallic_Roughness {
     MaterialPipeline transparentPipeline;
 
 
-    struct MaterialConstants {
-		glm::vec4 colorFactors;
-		glm::vec4 metal_rough_factors;
-        //padding, we need it anyway for uniform buffers
-		glm::vec4 extra[14];
-    };
-
-    struct MaterialResources {
-        AllocatedImage colorImage; 
-        VkSampler colorSampler;
-        AllocatedImage metalRoughImage;
-        VkSampler metalRoughSampler;
-        VkBuffer dataBuffer; 
-        uint32_t dataBufferOffset;
-    };
-
     void build_pipelines(VulkanEngine* engine);
     void clear_resources(VkDevice device);
 
-    MaterialInstance write_material(VkDevice device, MaterialPass pass, const MaterialResources& resources);
 };
 
 struct MeshNode : public Node {
@@ -157,11 +134,9 @@ public:
 	VkExtent2D swapchainExtent;
 	VkExtent2D drawExtent;
 
-    VkDescriptorPool descriptorPool;
 
     DescriptorAllocator globalDescriptorAllocator;
 
-    VkPipeline gradientPipeline;
     VkPipelineLayout gradientPipelineLayout;
     
     std::vector<VkImage> swapchainImages;
@@ -190,7 +165,6 @@ public:
 	VkPipeline postProcessPipeline {VK_NULL_HANDLE};
 	VkPipelineLayout postProcessPipelineLayout {VK_NULL_HANDLE};
 	VkDescriptorSetLayout postProcessImageLayout {VK_NULL_HANDLE};
-	VkDescriptorSet postProcessDescriptorSet {VK_NULL_HANDLE};
 
 	VkSemaphore timelineSemaphore {VK_NULL_HANDLE};
 	uint64_t timelineValue {0};
@@ -208,7 +182,6 @@ public:
 	VkSampler defaultSamplerLinear;
 	VkSampler defaultSamplerNearest;
 	
-    GPUMeshBuffers rectangle;
     DrawContext drawCommands;
     GPUSceneData sceneData;
 
@@ -254,7 +227,6 @@ public:
 	void resize_swapchain();
 
     FrameData& get_current_frame();
-    FrameData& get_last_frame();
     uint32_t get_current_frame_slot() const { return frameNumber % FRAME_OVERLAP; }
 
     AllocatedImage create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
@@ -269,7 +241,6 @@ public:
     void immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function);
 
     std::unordered_map<std::string, std::shared_ptr<LoadedGLTF>> loadedScenes;
-    std::vector<std::shared_ptr<LoadedGLTF>> brickadiaScene;
 
     float renderScale = 1;
 

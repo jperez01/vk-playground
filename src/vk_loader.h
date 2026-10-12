@@ -1,5 +1,4 @@
-// vulkan_guide.h : Include file for standard system include files,
-// or project specific include files.
+// glTF scene loading (fastgltf) into GPU meshes, materials and a node hierarchy.
 
 #pragma once
 

@@ -30,12 +30,6 @@ constexpr bool bUseValidationLayers = false;
 constexpr bool bUseValidationLayers = true;
 #endif
 
-// we want to immediately abort when there is an error. In normal engines this
-// would give an error message to the user, or perform a dump of state.
-using namespace std;
-
-#define CHAPTER_STAGE 1
-
 VulkanEngine* loadedEngine = nullptr;
 
 VulkanEngine& VulkanEngine::Get()
@@ -77,33 +71,6 @@ void VulkanEngine::init()
 }
 
 void VulkanEngine::init_default_data() {
-	std::array<Vertex, 4> rect_vertices;
-
-	rect_vertices[0].position = { 1.0,-1.0, 0 };
-	rect_vertices[1].position = { 1.0,1.0, 0 };
-	rect_vertices[2].position = { -1.0,-1.0, 0 };
-	rect_vertices[3].position = { -1.0,1.0, 0 };
-
-	rect_vertices[0].color = { 0,0, 0,1 };
-	rect_vertices[1].color = { 0.5,0.5,0.5 ,1 };
-	rect_vertices[2].color = { 1,0, 0,1 };
-	rect_vertices[3].color = { 0,1, 0,1 };
-
-	rect_vertices[0].uv_x = 1;
-	rect_vertices[0].uv_y = 0;
-	rect_vertices[1].uv_x = 0;
-	rect_vertices[1].uv_y = 0;
-	rect_vertices[2].uv_x = 1;
-	rect_vertices[2].uv_y = 1;
-	rect_vertices[3].uv_x = 0;
-	rect_vertices[3].uv_y = 1;
-
-	std::array<uint32_t, 6> rect_indices = {
-		0, 1, 2, 2, 1, 3
-	};
-
-	rectangle = uploadMesh(rect_indices, rect_vertices);
-
 	//3 default textures, white, grey, black. 1 pixel each
 	uint32_t white = glm::packUnorm4x8(glm::vec4(1, 1, 1, 1));
 	whiteImage = create_image((void*)&white, VkExtent3D{ 1, 1, 1 }, VK_FORMAT_R8G8B8A8_UNORM,
@@ -173,9 +140,7 @@ void VulkanEngine::cleanup()
 	greyImage = {};
 	errorCheckerboardImage = {};
 	defaultGLTFMaterialData = {};
-	rectangle = {};
     loadedScenes.clear();
-    brickadiaScene.clear();
 
     for (auto& frame : frames) {
         frame.sceneDataBuffer = {};
@@ -189,7 +154,6 @@ void VulkanEngine::cleanup()
 	for (int i = 0; i < FRAME_OVERLAP; i++) {
 		vkDestroyCommandPool(device, frames[i].commandPool, nullptr);
 		vkDestroySemaphore(device, frames[i].swapchainSemaphore, nullptr);
-		vkDestroySemaphore(device, frames[i].renderSemaphore, nullptr);
 	}
 	vkDestroySemaphore(device, timelineSemaphore, nullptr);
 
@@ -305,9 +269,6 @@ void VulkanEngine::init_background_pipelines()
 	//destroy structures properly
 	vkDestroyShaderModule(device, gradientShader, nullptr);
 	vkDestroyShaderModule(device, skyShader, nullptr);
-	VkPipelineLayout computeLayoutToDestroy = gradientPipelineLayout;
-	VkPipeline skyPipelineToDestroy = sky.pipeline;
-	VkPipeline gradientPipelineToDestroy = gradient.pipeline;
 }
 
 
@@ -461,7 +422,6 @@ void VulkanEngine::draw()
 	//begin the command buffer recording. We will use this command buffer exactly once, so we want to let vulkan know that
 	VkCommandBufferBeginInfo cmdBeginInfo = vkinit::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
-	//> draw_first
 	VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 	gpuProfiler.reset(cmd, slot);
 
@@ -537,8 +497,6 @@ void VulkanEngine::draw()
 	VkExtent2D extent;
 	extent.height = windowExtent.height;
 	extent.width = windowExtent.width;
-	//< draw_first
-	//> imgui_draw
 	// execute a copy from the post processing image into the swapchain
     vkutil::copy_image_to_image(cmd, postProcessingImage.image, swapchainImages[swapchainImageIndex], drawExtent,swapchainExtent);
 
@@ -618,7 +576,6 @@ void VulkanEngine::draw()
 	frameNumber++;
 }
 
-//> visfn
 bool is_visible(const RenderObject& obj, const glm::mat4& viewproj) {
     std::array<glm::vec3, 8> corners {
         glm::vec3 { 1, 1, 1 },
@@ -656,7 +613,6 @@ bool is_visible(const RenderObject& obj, const glm::mat4& viewproj) {
         return true;
     }
 }
-//< visfn
 
 void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
 {
@@ -825,7 +781,6 @@ void VulkanEngine::update_scene(const glm::mat4& viewMatrix)
     loadedScenes["structure"]->Draw(glm::mat4{ 1.f }, drawCommands);
 }
 
-//> create_mip_2
 AllocatedImage VulkanEngine::create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped) {
 	size_t data_size = size.depth * size.width * size.height * 4;
 	AllocatedBuffer uploadbuffer = vkutil::createBuffer(allocator, data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, vkutil::HOST_WRITE_MAPPED);
@@ -897,7 +852,6 @@ AllocatedImage VulkanEngine::create_image(VkCommandBuffer cmd, std::vector<Alloc
 	stagingBuffers.push_back(std::move(uploadbuffer));
 	return new_image;
 }
-//< create_mip_2
 
 GPUMeshBuffers VulkanEngine::uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices)
 {
@@ -988,11 +942,6 @@ GPUMeshBuffers VulkanEngine::uploadMesh(VkCommandBuffer cmd, std::vector<Allocat
 FrameData& VulkanEngine::get_current_frame()
 {
     return frames[frameNumber % FRAME_OVERLAP];
-}
-
-FrameData& VulkanEngine::get_last_frame()
-{
-    return frames[(frameNumber - 1) % FRAME_OVERLAP];
 }
 
 void VulkanEngine::immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function)
@@ -1161,8 +1110,6 @@ void VulkanEngine::init_swapchain()
 
 	VK_CHECK(vkCreateImageView(device, &dview_info, nullptr, &depthImage.imageView));
 
-
-	//add to deletion queues
 }
 
 
@@ -1289,7 +1236,6 @@ void VulkanEngine::init_sync_structures()
 
     for (int i = 0; i < FRAME_OVERLAP; i++) {
         VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frames[i].swapchainSemaphore));
-        VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frames[i].renderSemaphore));
 
 
     }
@@ -1297,15 +1243,15 @@ void VulkanEngine::init_sync_structures()
 
 void VulkanEngine::init_renderables()
 {
-	auto structureStart = chrono::steady_clock::now();
-    std::string structurePath = { "..\\assets\\structure.glb" };
+	auto structureStart = std::chrono::steady_clock::now();
+    std::string structurePath = std::string(ASSET_DIR) + "structure.glb";
     auto structureFile = loadGltf(this,structurePath);
 
     assert(structureFile.has_value());
 
     loadedScenes["structure"] = *structureFile;
-	auto structureEnd = chrono::steady_clock::now();
-	auto structureElapsed = chrono::duration_cast<chrono::milliseconds>(structureEnd - structureStart).count();
+	auto structureEnd = std::chrono::steady_clock::now();
+	auto structureElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(structureEnd - structureStart).count();
 	fmt::println("Time elapsed loading structure: {} ms", structureElapsed);
 
 }
@@ -1369,8 +1315,6 @@ void VulkanEngine::init_imgui()
 
 	ImGui_ImplVulkan_Init(&init_info);
 
-
-	// add the destroy the imgui created structures
 }
 
 void VulkanEngine::init_pipelines()
@@ -1710,19 +1654,6 @@ void GLTFMetallic_Roughness::clear_resources(VkDevice device)
 	transparentPipeline.layout = VK_NULL_HANDLE;
 }
 
-MaterialInstance GLTFMetallic_Roughness::write_material(VkDevice device, MaterialPass pass, const MaterialResources& resources)
-{
-    MaterialInstance matData;
-	matData.passType = pass;
-	if (pass == MaterialPass::Transparent) {
-		matData.pipeline = &transparentPipeline;
-	}
-	else {
-		matData.pipeline = &opaquePipeline;
-	}
-
-    return matData;
-}
 void MeshNode::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
 {
     glm::mat4 nodeMatrix = topMatrix * worldTransform;

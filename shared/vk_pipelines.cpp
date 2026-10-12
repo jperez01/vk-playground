@@ -3,7 +3,6 @@
 #include "vk_initializers.h"
 #include <fstream>
 
-//> pipe_clear
 void PipelineBuilder::clear()
 {
     // clear all of the structs we need back to 0 with their correct stype
@@ -24,9 +23,7 @@ void PipelineBuilder::clear()
 
     shaderStages.clear();
 }
-//< pipe_clear
 
-//> build_pipeline_1
 VkPipeline PipelineBuilder::build_pipeline(VkDevice device)
 {
     // make viewport state from our stored viewport and scissor.
@@ -52,9 +49,7 @@ VkPipeline PipelineBuilder::build_pipeline(VkDevice device)
     // completely clear VertexInputStateCreateInfo, as we have no need for it
     VkPipelineVertexInputStateCreateInfo _vertexInputInfo = { .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
 
-    //< build_pipeline_1
 
-    //> build_pipeline_2
     // build the actual pipeline
     // we now use all of the info structs we have been writing into into this one
     // to create the pipeline
@@ -73,8 +68,6 @@ VkPipeline PipelineBuilder::build_pipeline(VkDevice device)
     pipelineInfo.pDepthStencilState = &depthStencil;
     pipelineInfo.layout = pipelineLayout;
 
-    //< build_pipeline_2
-    //> build_pipeline_3
     VkDynamicState state[] = {
         VK_DYNAMIC_STATE_VIEWPORT,
         VK_DYNAMIC_STATE_SCISSOR,
@@ -90,8 +83,6 @@ VkPipeline PipelineBuilder::build_pipeline(VkDevice device)
     dynamicInfo.dynamicStateCount = 7;
 
     pipelineInfo.pDynamicState = &dynamicInfo;
-    //< build_pipeline_3
-    //> build_pipeline_4
     // its easy to error out on create graphics pipeline, so we handle it a bit
     // better than the common VK_CHECK case
     VkPipeline newPipeline;
@@ -103,9 +94,7 @@ VkPipeline PipelineBuilder::build_pipeline(VkDevice device)
     } else {
         return newPipeline;
     }
-    //< build_pipeline_4
 }
-//> set_shaders
 void PipelineBuilder::set_shaders(VkShaderModule vertexShader, VkShaderModule fragmentShader)
 {
     shaderStages.clear();
@@ -116,8 +105,6 @@ void PipelineBuilder::set_shaders(VkShaderModule vertexShader, VkShaderModule fr
     shaderStages.push_back(
         vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, fragmentShader));
 }
-//< set_shaders
-//> set_topo
 void PipelineBuilder::set_input_topology(VkPrimitiveTopology topology)
 {
     inputAssembly.topology = topology;
@@ -125,25 +112,19 @@ void PipelineBuilder::set_input_topology(VkPrimitiveTopology topology)
     // it on false
     inputAssembly.primitiveRestartEnable = VK_FALSE;
 }
-//< set_topo
 
-//> set_poly
 void PipelineBuilder::set_polygon_mode(VkPolygonMode mode)
 {
     rasterizer.polygonMode = mode;
     rasterizer.lineWidth = 1.f;
 }
-//< set_poly
 
-//> set_cull
 void PipelineBuilder::set_cull_mode(VkCullModeFlags cullMode, VkFrontFace frontFace)
 {
     rasterizer.cullMode = cullMode;
     rasterizer.frontFace = frontFace;
 }
-//< set_cull
 
-//> set_multisample
 void PipelineBuilder::set_multisampling_none()
 {
     multisampling.sampleShadingEnable = VK_FALSE;
@@ -155,9 +136,7 @@ void PipelineBuilder::set_multisampling_none()
     multisampling.alphaToCoverageEnable = VK_FALSE;
     multisampling.alphaToOneEnable = VK_FALSE;
 }
-//< set_multisample
 
-//> set_noblend
 void PipelineBuilder::disable_blending()
 {
     // default write mask
@@ -165,9 +144,7 @@ void PipelineBuilder::disable_blending()
     // no blending
     colorBlendAttachment.blendEnable = VK_FALSE;
 }
-//< set_noblend
 
-//> alphablend
 void PipelineBuilder::enable_blending_additive()
 {
     colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
@@ -191,9 +168,7 @@ void PipelineBuilder::enable_blending_alphablend()
     colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
     colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
 }
-//< alphablend
 
-//> set_formats
 void PipelineBuilder::set_color_attachment_format(VkFormat format)
 {
     colorAttachmentformat = format;
@@ -206,9 +181,7 @@ void PipelineBuilder::set_depth_format(VkFormat format)
 {
     renderInfo.depthAttachmentFormat = format;
 }
-//< set_formats
 
-//> depth_disable
 void PipelineBuilder::disable_depthtest()
 {
     depthStencil.depthTestEnable = VK_FALSE;
@@ -221,9 +194,7 @@ void PipelineBuilder::disable_depthtest()
     depthStencil.minDepthBounds = 0.f;
     depthStencil.maxDepthBounds = 1.f;
 }
-//< depth_disable
 
-//> depth_enable
 void PipelineBuilder::enable_depthtest(bool depthWriteEnable, VkCompareOp op)
 {
     depthStencil.depthTestEnable = VK_TRUE;
@@ -236,19 +207,17 @@ void PipelineBuilder::enable_depthtest(bool depthWriteEnable, VkCompareOp op)
     depthStencil.minDepthBounds = 0.f;
     depthStencil.maxDepthBounds = 1.f;
 }
-//< depth_enable
 
-//> load_shader
 bool vkutil::load_shader_module(const char* filePath,
     VkDevice device,
     VkShaderModule* outShaderModule)
 {
-    const std::string initialShaderPath = "../spirv/";
-    std::string finalPath = initialShaderPath + filePath + ".spv";
+    std::string finalPath = std::string(SHADER_DIR) + filePath + ".spv";
     // open the file. With cursor at the end
     std::ifstream file(finalPath, std::ios::ate | std::ios::binary);
 
     if (!file.is_open()) {
+        fmt::println("Failed to open shader file: {}", finalPath);
         return false;
     }
 
@@ -287,4 +256,3 @@ bool vkutil::load_shader_module(const char* filePath,
     *outShaderModule = shaderModule;
     return true;
 }
-//< load_shader

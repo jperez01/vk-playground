@@ -5,7 +5,6 @@
 #include <deque>
 #include <span>
 
-//> descriptor_layout
 struct DescriptorLayoutBuilder {
 
     std::vector<VkDescriptorSetLayoutBinding> bindings;
@@ -14,8 +13,6 @@ struct DescriptorLayoutBuilder {
     void clear();
     VkDescriptorSetLayout build(VkDevice device, VkShaderStageFlags shaderStages, void* pNext = nullptr, VkDescriptorSetLayoutCreateFlags flags = 0);
 };
-//< descriptor_layout
-//> descriptor_allocator
 struct DescriptorAllocator {
 
     struct PoolSizeRatio{
@@ -31,4 +28,3 @@ struct DescriptorAllocator {
 
     VkDescriptorSet allocate(VkDevice device, VkDescriptorSetLayout layout);
 };
-//< descriptor_allocator
