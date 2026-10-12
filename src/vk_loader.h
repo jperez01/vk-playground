@@ -33,7 +33,7 @@ struct MeshAsset {
 
    
     std::vector<GeoSurface> surfaces;
-    GPUMeshBuffers meshBuffers;
+    std::shared_ptr<GPUMeshBuffers> meshBuffers;
 };
 
 struct LoadedGLTF : public IRenderable {

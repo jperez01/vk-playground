@@ -38,7 +38,7 @@ std::optional<AllocatedImage> load_image(VulkanEngine* engine, fastgltf::Asset& 
                     imagesize.height = height;
                     imagesize.depth = 1;
 
-                    newImage = engine->create_image(cmd, stagingBuffers, data, imagesize, format, VK_IMAGE_USAGE_SAMPLED_BIT,false);
+                    newImage = engine->create_image(cmd, stagingBuffers, data, imagesize, format, VK_IMAGE_USAGE_SAMPLED_BIT,true);
 
                     stbi_image_free(data);
                 }
@@ -52,7 +52,7 @@ std::optional<AllocatedImage> load_image(VulkanEngine* engine, fastgltf::Asset& 
                     imagesize.height = height;
                     imagesize.depth = 1;
 
-                    newImage = engine->create_image(cmd, stagingBuffers, data, imagesize, format, VK_IMAGE_USAGE_SAMPLED_BIT,false);
+                    newImage = engine->create_image(cmd, stagingBuffers, data, imagesize, format, VK_IMAGE_USAGE_SAMPLED_BIT,true);
 
                     stbi_image_free(data);
                 }
@@ -76,7 +76,7 @@ std::optional<AllocatedImage> load_image(VulkanEngine* engine, fastgltf::Asset& 
                                        imagesize.depth = 1;
 
                                        newImage = engine->create_image(cmd, stagingBuffers, data, imagesize, format,
-                                           VK_IMAGE_USAGE_SAMPLED_BIT,false);
+                                           VK_IMAGE_USAGE_SAMPLED_BIT,true);
 
                                        stbi_image_free(data);
                                    }
@@ -246,7 +246,7 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
 //> load_buffer
     // create buffer to hold the material data
     file.materialDataBuffer = vkutil::createBuffer(engine->allocator, sizeof(GPUGLTFMaterial) * gltf.materials.size(),
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, vkutil::HOST_WRITE_MAPPED);
 
     VkBufferDeviceAddressInfo deviceAddressInfo{ .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = file.materialDataBuffer.buffer };
     VkDeviceAddress materialBufferAddress = vkGetBufferDeviceAddress(engine->device, &deviceAddressInfo);
@@ -306,8 +306,7 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
     }
 //< load_material
 
-    // use the same vectors for all meshes so that the memory doesnt reallocate as
-    // often
+    // all meshes in the file share one vertex buffer and one index buffer
     std::vector<uint32_t> indices;
     std::vector<Vertex> vertices;
 
@@ -316,10 +315,6 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
         meshes.push_back(newmesh);
         file.meshes[mesh.name.c_str()] = newmesh;
         newmesh->name = mesh.name;
-
-        // clear the mesh arrays each mesh, we dont want to merge them by error
-        indices.clear();
-        vertices.clear();
 
         for (auto&& p : mesh.primitives) {
             GeoSurface newSurface;
@@ -406,7 +401,13 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
             newmesh->surfaces.push_back(newSurface);
         }
 
-        newmesh->meshBuffers = engine->uploadMesh(cmd, stagingBuffers, indices, vertices);
+    }
+
+    if (!vertices.empty()) {
+        auto sharedBuffers = std::make_shared<GPUMeshBuffers>(engine->uploadMesh(cmd, stagingBuffers, indices, vertices));
+        for (auto& m : meshes) {
+            m->meshBuffers = sharedBuffers;
+        }
     }
 //> load_nodes
     // load all nodes and their meshes

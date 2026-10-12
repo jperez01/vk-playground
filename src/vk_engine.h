@@ -7,6 +7,8 @@
 
 #include <deque>
 #include <functional>
+#include <map>
+#include <utility>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -77,6 +79,7 @@ struct FrameData {
 };
 
 constexpr unsigned int FRAME_OVERLAP = 2;
+constexpr uint32_t MAX_GLOBAL_TEXTURES = 1000;
 
 
 struct DrawContext {
@@ -88,7 +91,7 @@ struct EngineStats {
     float frametime;
     int triangle_count;
     int drawcall_count;
-    float mesh_draw_time;
+    float geometry_record_time;
 };
 
 struct GLTFMetallic_Roughness {
@@ -168,6 +171,7 @@ public:
 	VkDescriptorSet drawImageDescriptors;
 	VkDescriptorSetLayout drawImageDescriptorLayout;
     uint32_t globalTextureCount{ 0 };
+    std::map<std::pair<VkImageView, VkSampler>, int> globalTextureSlots;
     int add_global_texture(VkImageView view, VkSampler sampler);
 
 
@@ -267,6 +271,7 @@ public:
     float renderScale = 1;
 
     bool resize_requested{false};
+    VkPresentModeKHR presentMode { VK_PRESENT_MODE_FIFO_KHR };
     bool freeze_rendering{false};
 private:
     void init_vulkan();
