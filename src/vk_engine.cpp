@@ -874,56 +874,42 @@ void VulkanEngine::initSwapchain()
 {
     createSwapchain(windowExtent.width, windowExtent.height);
 
-	//depth image size will match the window
-	VkExtent3D drawImageExtent = {
-		windowExtent.width,
-		windowExtent.height,
-		1
-	};
+    createRenderTargets(windowExtent);
+}
 
-	//hardcoding the draw format to 32 bit float
-	drawImage.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
-    drawImage.imageExtent = drawImageExtent;
+void VulkanEngine::createRenderTargets(VkExtent2D extent)
+{
+	VkExtent3D size = { extent.width, extent.height, 1 };
 
-	VkImageUsageFlags drawImageUsages{};
-	drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-	drawImageUsages |= VK_IMAGE_USAGE_STORAGE_BIT;
-	drawImageUsages |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-	drawImageUsages |= VK_IMAGE_USAGE_SAMPLED_BIT;
+	drawImage = vkutil::createImage(device, allocator, size, VK_FORMAT_R16G16B16A16_SFLOAT,
+		VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, false);
 
-	VkImageCreateInfo rimg_info = vkinit::imageCreateInfo(drawImage.imageFormat, drawImageUsages, drawImageExtent);
+	depthImage = vkutil::createImage(device, allocator, size, VK_FORMAT_D32_SFLOAT,
+		VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, false);
 
-	//for the draw image, we want to allocate it from gpu local memory
-	VmaAllocationCreateInfo rimg_allocinfo = {};
-	rimg_allocinfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-	rimg_allocinfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	postProcessingImage = vkutil::createImage(device, allocator, size, VK_FORMAT_R16G16B16A16_SFLOAT,
+		VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, false);
+}
 
-	//allocate and create the image
-	vmaCreateImage(allocator, &rimg_info, &rimg_allocinfo, &drawImage.image, &drawImage.allocation, nullptr);
+void VulkanEngine::writeDrawImageDescriptor()
+{
+	if (drawImageDescriptors == VK_NULL_HANDLE) {
+		return;
+	}
 
-	//build a image-view for the draw image to use for rendering
-	VkImageViewCreateInfo rview_info = vkinit::imageViewCreateInfo(drawImage.imageFormat, drawImage.image, VK_IMAGE_ASPECT_COLOR_BIT);
+	VkDescriptorImageInfo imgInfo{};
+	imgInfo.imageView = drawImage.imageView;
+	imgInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-	VK_CHECK(vkCreateImageView(device, &rview_info, nullptr, &drawImage.imageView));
+	VkWriteDescriptorSet write{};
+	write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	write.dstSet = drawImageDescriptors;
+	write.dstBinding = 0;
+	write.descriptorCount = 1;
+	write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	write.pImageInfo = &imgInfo;
 
-    //create a depth image too
-	//hardcoding the draw format to 32 bit float
-	depthImage.imageFormat = VK_FORMAT_D32_SFLOAT;
-    depthImage.imageExtent = drawImageExtent;
-
-	VkImageUsageFlags depthImageUsages{};
-	depthImageUsages |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-
-	VkImageCreateInfo dimg_info = vkinit::imageCreateInfo(depthImage.imageFormat, depthImageUsages, drawImageExtent);
-
-	//allocate and create the image
-	vmaCreateImage(allocator, &dimg_info, &rimg_allocinfo, &depthImage.image, &depthImage.allocation, nullptr);
-
-	//build a image-view for the draw image to use for rendering
-	VkImageViewCreateInfo dview_info = vkinit::imageViewCreateInfo(depthImage.imageFormat, depthImage.image, VK_IMAGE_ASPECT_DEPTH_BIT);
-
-	VK_CHECK(vkCreateImageView(device, &dview_info, nullptr, &depthImage.imageView));
-
+	vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
 }
 
 
@@ -988,14 +974,20 @@ void VulkanEngine::resizeSwapchain()
         VK_CHECK(vkWaitSemaphores(device, &waitInfo, 1000000000));
     }
 
-	destroySwapchain();
-
 	int w, h;
 	SDL_GetWindowSize(window, &w, &h);
+	if (w == 0 || h == 0) {
+		return;
+	}
+
+	destroySwapchain();
+
 	windowExtent.width = w;
 	windowExtent.height = h;
 
 	createSwapchain(windowExtent.width, windowExtent.height);
+	createRenderTargets(windowExtent);
+	writeDrawImageDescriptor();
 	resizeRequested = false;
 }
 
@@ -1173,21 +1165,7 @@ void VulkanEngine::initDescriptors()
 
 
     drawImageDescriptors = globalDescriptorAllocator.allocate(device, drawImageDescriptorLayout);
-    {
-        VkDescriptorImageInfo imgInfo{};
-        imgInfo.imageView = drawImage.imageView;
-        imgInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-        VkWriteDescriptorSet write{};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = drawImageDescriptors;
-        write.dstBinding = 0;
-        write.descriptorCount = 1;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        write.pImageInfo = &imgInfo;
-
-        vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
-    }
+    writeDrawImageDescriptor();
 
     for (int i = 0; i < FRAME_OVERLAP; i++) {
         frames[i].globalDescriptor = globalDescriptorAllocator.allocate(device, gpuSceneDataDescriptorLayout);
@@ -1308,35 +1286,6 @@ void VulkanEngine::initPostProcessPipeline() {
 	pipelineLayoutInfo.pSetLayouts = &postProcessImageLayout;
 
 	VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &postProcessPipelineLayout));
-
-	//depth image size will match the window
-	VkExtent3D postProcessImageExtent = {
-		windowExtent.width,
-		windowExtent.height,
-		1
-	};
-
-	postProcessingImage.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
-	postProcessingImage.imageExtent = postProcessImageExtent;
-
-	VkImageUsageFlags postProcessImageUsages{};
-	postProcessImageUsages |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-	postProcessImageUsages |= VK_IMAGE_USAGE_STORAGE_BIT;
-	postProcessImageUsages |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-
-	VkImageCreateInfo postProcessImageCreateInfo = vkinit::imageCreateInfo(postProcessingImage.imageFormat, postProcessImageUsages, postProcessImageExtent);
-
-	//for the draw image, we want to allocate it from gpu local memory
-	VmaAllocationCreateInfo rimg_allocinfo = {};
-	rimg_allocinfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-	rimg_allocinfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-	//allocate and create the image
-	vmaCreateImage(allocator, &postProcessImageCreateInfo, &rimg_allocinfo, &postProcessingImage.image, &postProcessingImage.allocation, nullptr);
-
-	//build a image-view for the draw image to use for rendering
-	VkImageViewCreateInfo rview_info = vkinit::imageViewCreateInfo(postProcessingImage.imageFormat, postProcessingImage.image, VK_IMAGE_ASPECT_COLOR_BIT);
-	VK_CHECK(vkCreateImageView(device, &rview_info, nullptr, &postProcessingImage.imageView));
 
 	VkShaderModule computeShader;
 	if (!vkutil::loadShaderModule("post_process.comp", device, &computeShader)) {

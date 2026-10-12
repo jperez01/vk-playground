@@ -139,7 +139,7 @@ public:
     std::vector<VkSemaphore> swapchainRenderSemaphores;
     std::vector<bool> swapchainImageInitialized;
 
-	VkDescriptorSet drawImageDescriptors;
+	VkDescriptorSet drawImageDescriptors = VK_NULL_HANDLE;
 	VkDescriptorSetLayout drawImageDescriptorLayout;
     uint32_t globalTextureCount{ 0 };
     std::map<std::pair<VkImageView, VkSampler>, int> globalTextureSlots;
@@ -242,6 +242,9 @@ private:
     void createSwapchain(uint32_t width, uint32_t height);
 
     void destroySwapchain();
+
+    void createRenderTargets(VkExtent2D extent);
+    void writeDrawImageDescriptor();
 
     void initCommands();
 
