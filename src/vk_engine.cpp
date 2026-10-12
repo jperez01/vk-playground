@@ -259,60 +259,6 @@ void VulkanEngine::initBackgroundPipelines()
 }
 
 
-void VulkanEngine::drawMain(VkCommandBuffer cmd)
-{
-	ComputeEffect& effect = backgroundEffects[currentBackgroundEffect];
-	const uint32_t slot = getCurrentFrameSlot();
-
-	gpuProfiler.begin(cmd, slot, GpuPass::Background);
-	// bind the background compute pipeline
-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, effect.pipeline);
-
-	// bind the descriptor set containing the draw image for the compute pipeline
-	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, gradientPipelineLayout, 0, 1, &drawImageDescriptors, 0, nullptr);
-
-	vkCmdPushConstants(cmd, gradientPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputePushConstants), &effect.data);
-	// execute the compute pipeline dispatch. We are using 16x16 workgroup size so we need to divide by it
-	vkCmdDispatch(cmd, (uint32_t)std::ceil(drawExtent.width / 16.0), (uint32_t)std::ceil(drawExtent.height / 16.0), 1);
-	gpuProfiler.end(cmd, slot, GpuPass::Background);
-
-	//draw the triangle
-
-	gpuProfiler.begin(cmd, slot, GpuPass::Geometry);
-	vkutil::transitionImageForColorAttachment(cmd, drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-
-	VkClearValue clearValue{};
-	clearValue.color = { {0.0f, 0.0f, 0.0f, 1.0f} };
-	VkRenderingAttachmentInfo colorAttachment = vkinit::attachmentInfo(drawImage.imageView, &clearValue, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-	VkRenderingAttachmentInfo depthAttachment = vkinit::depthAttachmentInfo(depthImage.imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
-
-	VkRenderingInfo renderInfo = vkinit::renderingInfo(drawExtent, &colorAttachment, &depthAttachment);
-
-	vkCmdBeginRendering(cmd, &renderInfo);
-	auto start = std::chrono::steady_clock::now();
-	drawGeometry(cmd);
-
-	auto end = std::chrono::steady_clock::now();
-	auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-
-	stats.geometryRecordTime = elapsed.count() / 1000.f;
-
-	vkCmdEndRendering(cmd);
-	gpuProfiler.end(cmd, slot, GpuPass::Geometry);
-}
-
-void VulkanEngine::drawImGui(VkCommandBuffer cmd, VkImageView targetImageView)
-{
-	VkRenderingAttachmentInfo colorAttachment = vkinit::attachmentInfo(targetImageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-	VkRenderingInfo renderInfo = vkinit::renderingInfo(swapchainExtent, &colorAttachment, nullptr);
-
-	vkCmdBeginRendering(cmd, &renderInfo);
-
-	ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
-
-	vkCmdEndRendering(cmd);
-}
-
 namespace vkutil {
     void deferDestroyBuffer(VkBuffer buffer, VmaAllocation allocation) {
         VulkanEngine::Get().deferDestroy(buffer, allocation);
@@ -366,7 +312,7 @@ void VulkanEngine::deferDestroy(VkSampler sampler) {
     getCurrentFrame().garbage.samplers.push_back(sampler);
 }
 
-void VulkanEngine::draw()
+bool VulkanEngine::beginFrame(uint32_t& swapchainImageIndex)
 {
 	// Wait for the submit that last used this frame slot (FRAME_OVERLAP frames ago),
 	// so the CPU can record this frame while the GPU works on the previous one.
@@ -387,34 +333,62 @@ void VulkanEngine::draw()
 	gpuProfiler.collect(device, slot);
 
 	getCurrentFrame().garbage.flush(device, allocator);
-	//request image from the swapchain
-	uint32_t swapchainImageIndex;
 
 	VkResult e = vkAcquireNextImageKHR(device, swapchain, 1000000000, getCurrentFrame().swapchainSemaphore, nullptr, &swapchainImageIndex);
 	if (e == VK_ERROR_OUT_OF_DATE_KHR) {
-        resizeRequested = true;
-		return ;
+		resizeRequested = true;
+		return false;
 	}
 
 	drawExtent.height = std::min(swapchainExtent.height, drawImage.imageExtent.height) * renderScale;
 	drawExtent.width = std::min(swapchainExtent.width, drawImage.imageExtent.width) * renderScale;
+	return true;
+}
 
-
-	//now that we are sure that the commands finished executing, we can safely reset the command buffer to begin recording again.
-	VK_CHECK(vkResetCommandBuffer(getCurrentFrame().mainCommandBuffer, 0));
-
-	//naming it cmd for shorter writing
+VkCommandBuffer VulkanEngine::beginCommandBuffer()
+{
+	// the slot's previous submit has finished (waited in beginFrame), so the command buffer can be reset and re-recorded
 	VkCommandBuffer cmd = getCurrentFrame().mainCommandBuffer;
+	VK_CHECK(vkResetCommandBuffer(cmd, 0));
 
-	//begin the command buffer recording. We will use this command buffer exactly once, so we want to let vulkan know that
+	// this command buffer is submitted exactly once per recording
 	VkCommandBufferBeginInfo cmdBeginInfo = vkinit::commandBufferBeginInfo(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
 	VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
-	gpuProfiler.reset(cmd, slot);
+	gpuProfiler.reset(cmd, getCurrentFrameSlot());
+	return cmd;
+}
+
+// Runs the background compute effect into the draw image.
+void VulkanEngine::recordBackgroundPass(VkCommandBuffer cmd)
+{
+	ComputeEffect& effect = backgroundEffects[currentBackgroundEffect];
+	const uint32_t slot = getCurrentFrameSlot();
+
+	gpuProfiler.begin(cmd, slot, GpuPass::Background);
 
 	// transition our main draw image into general layout so we can write into it
 	// we will overwrite it all so we dont care about what was the older layout
 	vkutil::transitionImageForComputeWrite(cmd, drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
+	// bind the background compute pipeline
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, effect.pipeline);
+
+	// bind the descriptor set containing the draw image for the compute pipeline
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, gradientPipelineLayout, 0, 1, &drawImageDescriptors, 0, nullptr);
+
+	vkCmdPushConstants(cmd, gradientPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputePushConstants), &effect.data);
+	// execute the compute pipeline dispatch. We are using 16x16 workgroup size so we need to divide by it
+	vkCmdDispatch(cmd, (uint32_t)std::ceil(drawExtent.width / 16.0), (uint32_t)std::ceil(drawExtent.height / 16.0), 1);
+	gpuProfiler.end(cmd, slot, GpuPass::Background);
+}
+
+// Renders the scene geometry into the draw image with depth.
+void VulkanEngine::recordGeometryPass(VkCommandBuffer cmd)
+{
+	const uint32_t slot = getCurrentFrameSlot();
+
+	gpuProfiler.begin(cmd, slot, GpuPass::Geometry);
 	vkutil::transitionImage(
 		cmd,
 		depthImage.image,
@@ -425,15 +399,39 @@ void VulkanEngine::draw()
 		VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
 		VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
 		VK_IMAGE_ASPECT_DEPTH_BIT);
+	vkutil::transitionImageForColorAttachment(cmd, drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-	drawMain(cmd);
+	VkClearValue clearValue{};
+	clearValue.color = { {0.0f, 0.0f, 0.0f, 1.0f} };
+	VkRenderingAttachmentInfo colorAttachment = vkinit::attachmentInfo(drawImage.imageView, &clearValue, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+	VkRenderingAttachmentInfo depthAttachment = vkinit::depthAttachmentInfo(depthImage.imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+
+	VkRenderingInfo renderInfo = vkinit::renderingInfo(drawExtent, &colorAttachment, &depthAttachment);
+
+	vkCmdBeginRendering(cmd, &renderInfo);
+	auto start = std::chrono::steady_clock::now();
+	drawGeometry(cmd);
+
+	auto end = std::chrono::steady_clock::now();
+	auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+	stats.geometryRecordTime = elapsed.count() / 1000.f;
+
+	vkCmdEndRendering(cmd);
+	gpuProfiler.end(cmd, slot, GpuPass::Geometry);
+}
+
+// Tonemaps the draw image into the post processing image with a compute dispatch.
+void VulkanEngine::recordTonemapPass(VkCommandBuffer cmd)
+{
+	const uint32_t slot = getCurrentFrameSlot();
 
 	//transition the draw image and post processing image to GENERAL for compute
 	gpuProfiler.begin(cmd, slot, GpuPass::Tonemap);
 	vkutil::transitionImage(cmd, drawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
 		VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
 		VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
-		
+
 	vkutil::transitionImage(cmd, postProcessingImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
 		VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
 		VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT);
@@ -461,6 +459,12 @@ void VulkanEngine::draw()
 	vkCmdDispatch(cmd, (uint32_t)std::ceil(drawExtent.width / 16.0), (uint32_t)std::ceil(drawExtent.height / 16.0), 1);
 
 	gpuProfiler.end(cmd, slot, GpuPass::Tonemap);
+}
+
+// Copies the post processing image into the swapchain image.
+void VulkanEngine::recordBlitPass(VkCommandBuffer cmd, uint32_t swapchainImageIndex)
+{
+	const uint32_t slot = getCurrentFrameSlot();
 
 	//transition the post processing image and the swapchain image into their correct transfer layouts
 	gpuProfiler.begin(cmd, slot, GpuPass::Blit);
@@ -481,13 +485,16 @@ void VulkanEngine::draw()
 		VK_PIPELINE_STAGE_2_TRANSFER_BIT,
 		VK_ACCESS_2_TRANSFER_WRITE_BIT);
 
-	VkExtent2D extent;
-	extent.height = windowExtent.height;
-	extent.width = windowExtent.width;
 	// execute a copy from the post processing image into the swapchain
-    vkutil::copyImageToImage(cmd, postProcessingImage.image, swapchainImages[swapchainImageIndex], drawExtent,swapchainExtent);
+	vkutil::copyImageToImage(cmd, postProcessingImage.image, swapchainImages[swapchainImageIndex], drawExtent,swapchainExtent);
 
 	gpuProfiler.end(cmd, slot, GpuPass::Blit);
+}
+
+// Draws the ImGui overlay on top of the swapchain image.
+void VulkanEngine::recordUiPass(VkCommandBuffer cmd, uint32_t swapchainImageIndex)
+{
+	const uint32_t slot = getCurrentFrameSlot();
 
 	// set swapchain image layout to Attachment Optimal so we can draw it
 	gpuProfiler.begin(cmd, slot, GpuPass::Ui);
@@ -501,11 +508,21 @@ void VulkanEngine::draw()
 		VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
 		VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
 
-	//draw imgui into the swapchain image
-	drawImGui(cmd, swapchainImageViews[swapchainImageIndex]);
-	gpuProfiler.end(cmd, slot, GpuPass::Ui);
+	VkRenderingAttachmentInfo colorAttachment = vkinit::attachmentInfo(swapchainImageViews[swapchainImageIndex], nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+	VkRenderingInfo renderInfo = vkinit::renderingInfo(swapchainExtent, &colorAttachment, nullptr);
 
-	// set swapchain image layout to Present so we can draw it
+	vkCmdBeginRendering(cmd, &renderInfo);
+
+	ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+
+	vkCmdEndRendering(cmd);
+	gpuProfiler.end(cmd, slot, GpuPass::Ui);
+}
+
+// Finishes the command buffer, submits it and presents the swapchain image.
+void VulkanEngine::submitAndPresent(VkCommandBuffer cmd, uint32_t swapchainImageIndex)
+{
+	// set swapchain image layout to Present so we can show it
 	vkutil::transitionImage(
 		cmd,
 		swapchainImages[swapchainImageIndex],
@@ -520,14 +537,12 @@ void VulkanEngine::draw()
 	//finalize the command buffer (we can no longer add commands, but it can now be executed)
 	VK_CHECK(vkEndCommandBuffer(cmd));
 
-	//prepare the submission to the queue.
-	//we want to wait on the presentSemaphore, as that semaphore is signaled when the swapchain is ready
-	//we will signal the renderSemaphore, to signal that rendering has finished
+	//the submit waits on the swapchain acquire semaphore and signals the per-image render semaphore plus the frame timeline
 
 	VkCommandBufferSubmitInfo cmdinfo = vkinit::commandBufferSubmitInfo(cmd);
 
-    timelineValue++;
-    getCurrentFrame().frameTimelineValue = timelineValue;
+	timelineValue++;
+	getCurrentFrame().frameTimelineValue = timelineValue;
 
 	VkSemaphoreSubmitInfo waitInfo = vkinit::semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR, getCurrentFrame().swapchainSemaphore);
 
@@ -540,10 +555,8 @@ void VulkanEngine::draw()
 
 	VK_CHECK(vkQueueSubmit2(graphicsQueue, 1, &submit, VK_NULL_HANDLE));
 
-	//prepare present
-	// this will put the image we just rendered to into the visible window.
-	// we want to wait on the renderSemaphore for that,
-	// as its necessary that drawing commands have finished before the image is displayed to the user
+	// present the image we just rendered to, waiting on its render semaphore
+	// so drawing commands have finished before the image is displayed to the user
 	VkPresentInfoKHR presentInfo = vkinit::presentInfo();
 
 	presentInfo.pSwapchains = &swapchain;
@@ -556,11 +569,28 @@ void VulkanEngine::draw()
 
 	VkResult presentResult = vkQueuePresentKHR(graphicsQueue, &presentInfo);
 	if (presentResult == VK_ERROR_OUT_OF_DATE_KHR) {
-        resizeRequested = true;
-        return;
+		resizeRequested = true;
+		return;
 	}
 	//increase the number of frames drawn
 	frameNumber++;
+}
+
+void VulkanEngine::draw()
+{
+	uint32_t swapchainImageIndex;
+	if (!beginFrame(swapchainImageIndex)) {
+		return;
+	}
+	VkCommandBuffer cmd = beginCommandBuffer();
+
+	recordBackgroundPass(cmd);
+	recordGeometryPass(cmd);
+	recordTonemapPass(cmd);
+	recordBlitPass(cmd, swapchainImageIndex);
+	recordUiPass(cmd, swapchainImageIndex);
+
+	submitAndPresent(cmd, swapchainImageIndex);
 }
 
 bool isVisible(const RenderObject& obj, const glm::mat4& viewproj) {
@@ -787,6 +817,7 @@ void VulkanEngine::initVulkan()
    features12.bufferDeviceAddress = true;
    features12.descriptorIndexing = true;
    features12.descriptorBindingPartiallyBound = true;
+   features12.descriptorBindingSampledImageUpdateAfterBind = true;
    features12.runtimeDescriptorArray = true;
    features12.timelineSemaphore = true;
    features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
@@ -1127,7 +1158,8 @@ void VulkanEngine::initDescriptors()
         builder.addBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
         builder.addBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_GLOBAL_TEXTURES); // Global texture array
 
-        VkDescriptorBindingFlags bindFlags[2] = { 0, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT };
+        // textures can be added while the other frame is still in flight
+        VkDescriptorBindingFlags bindFlags[2] = { 0, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT };
         VkDescriptorSetLayoutBindingFlagsCreateInfo extendedInfo = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO };
         extendedInfo.bindingCount = 2;
         extendedInfo.pBindingFlags = bindFlags;

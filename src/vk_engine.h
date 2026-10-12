@@ -202,8 +202,6 @@ public:
 
     // draw loop
     void draw();
-	void drawMain(VkCommandBuffer cmd);
-	void drawImGui(VkCommandBuffer cmd, VkImageView targetImageView);
 
 	void renderNodes();
 
@@ -231,6 +229,15 @@ public:
     VkPresentModeKHR presentMode { VK_PRESENT_MODE_FIFO_KHR };
     bool freezeRendering{false};
 private:
+    bool beginFrame(uint32_t& swapchainImageIndex);
+    VkCommandBuffer beginCommandBuffer();
+    void recordBackgroundPass(VkCommandBuffer cmd);
+    void recordGeometryPass(VkCommandBuffer cmd);
+    void recordTonemapPass(VkCommandBuffer cmd);
+    void recordBlitPass(VkCommandBuffer cmd, uint32_t swapchainImageIndex);
+    void recordUiPass(VkCommandBuffer cmd, uint32_t swapchainImageIndex);
+    void submitAndPresent(VkCommandBuffer cmd, uint32_t swapchainImageIndex);
+
     void initVulkan();
 
     void initSwapchain();
