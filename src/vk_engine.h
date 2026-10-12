@@ -17,6 +17,7 @@
 #include <vk_mem_alloc.h>
  
 #include <camera.h>
+#include "gpu_profiler.h"
 #include <vk_descriptors.h>
 #include <vk_loader.h>
 #include <vk_pipelines.h>
@@ -68,14 +69,14 @@ struct FrameGarbage {
 };
 
 struct FrameData {
-	VkSemaphore _swapchainSemaphore, _renderSemaphore;
-	uint64_t _frameTimelineValue {0};
-    FrameGarbage _garbage;
+	VkSemaphore swapchainSemaphore, renderSemaphore;
+	uint64_t frameTimelineValue {0};
+    FrameGarbage garbage;
     AllocatedBuffer sceneDataBuffer;
     VkDescriptorSet globalDescriptor;
 
-    VkCommandPool _commandPool;
-    VkCommandBuffer _mainCommandBuffer;
+    VkCommandPool commandPool;
+    VkCommandBuffer mainCommandBuffer;
 };
 
 constexpr unsigned int FRAME_OVERLAP = 2;
@@ -191,8 +192,8 @@ public:
 	VkDescriptorSetLayout postProcessImageLayout {VK_NULL_HANDLE};
 	VkDescriptorSet postProcessDescriptorSet {VK_NULL_HANDLE};
 
-	VkSemaphore _timelineSemaphore {VK_NULL_HANDLE};
-	uint64_t _timelineValue {0};
+	VkSemaphore timelineSemaphore {VK_NULL_HANDLE};
+	uint64_t timelineValue {0};
 
     // immediate submit structures
     VkFence immFence;
@@ -214,6 +215,7 @@ public:
     Camera mainCamera;
 
     EngineStats stats;
+    GpuProfiler gpuProfiler;
 
 	std::vector<std::unique_ptr<Model>> importedModels;
 
@@ -253,6 +255,7 @@ public:
 
     FrameData& get_current_frame();
     FrameData& get_last_frame();
+    uint32_t get_current_frame_slot() const { return frameNumber % FRAME_OVERLAP; }
 
     AllocatedImage create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
     AllocatedImage create_image(VkCommandBuffer cmd, std::vector<AllocatedBuffer>& stagingBuffers, void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
