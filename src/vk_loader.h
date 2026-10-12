@@ -63,3 +63,6 @@ private:
 };
 
 std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::string_view filePath);
+
+// Imports a model with Assimp (OBJ, FBX, ...) and uploads it as a LoadedScene.
+std::optional<std::shared_ptr<LoadedScene>> loadModel(VulkanEngine* engine, const std::string& filePath);

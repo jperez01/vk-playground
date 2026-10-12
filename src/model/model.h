@@ -7,16 +7,12 @@
 
 #include <assimp/scene.h>
 
-#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "vk_types.h"
-
-class VulkanEngine;
-struct LoadedScene;
 
 struct Mesh {
     std::vector<Vertex> vertices;
@@ -60,8 +56,5 @@ private:
     std::optional<TextureInfo> loadTexture(const char* path, void* dataBuffer, unsigned int bufferSize);
 };
 
-
-
-std::optional<std::shared_ptr<LoadedScene>> loadModel(VulkanEngine* engine, const std::string& filePath);
 
 #endif //MODEL_H

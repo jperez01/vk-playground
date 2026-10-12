@@ -5,7 +5,6 @@
 #include "ui.h"
 
 #include "imgui.h"
-#include "model/model.h"
 #include "vk_engine.h"
 #include "nfd.h"
 #include "fmt/std.h"
