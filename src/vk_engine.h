@@ -143,6 +143,7 @@ public:
 
     VkDescriptorPool imguiPool {VK_NULL_HANDLE};
     AllocatedBuffer defaultGLTFMaterialData;
+    VkDeviceAddress defaultMaterialAddress {0};
 
     FrameData frames[FRAME_OVERLAP];
 

@@ -24,7 +24,11 @@
 #include "app/ui.h"
 #include "utils/util.h"
 
+#ifdef NDEBUG
+constexpr bool bUseValidationLayers = false;
+#else
 constexpr bool bUseValidationLayers = true;
+#endif
 
 // we want to immediately abort when there is an error. In normal engines this
 // would give an error message to the user, or perform a dump of state.
@@ -136,6 +140,18 @@ void VulkanEngine::init_default_data() {
 	sampl.minFilter = VK_FILTER_LINEAR;
 	vkCreateSampler(device, &sampl, nullptr, &defaultSamplerLinear);
 
+	defaultGLTFMaterialData = vkutil::createBuffer(allocator, sizeof(GPUGLTFMaterial),
+		VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+	VkBufferDeviceAddressInfo deviceAdressInfo{ .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = defaultGLTFMaterialData.buffer };
+	defaultMaterialAddress = vkGetBufferDeviceAddress(device, &deviceAdressInfo);
+
+	uint32_t whiteTexID = add_global_texture(whiteImage.imageView, defaultSamplerLinear);
+	GPUGLTFMaterial* defaultMaterial = (GPUGLTFMaterial*)defaultGLTFMaterialData.info.pMappedData;
+	defaultMaterial->colorFactors = glm::vec4(1.f);
+	defaultMaterial->metal_rough_factors = glm::vec4(1.f, 1.f, 0.f, 0.f);
+	defaultMaterial->colorTexID = whiteTexID;
+	defaultMaterial->metalRoughTexID = whiteTexID;
 }
 
 void VulkanEngine::cleanup()
@@ -236,11 +252,13 @@ void VulkanEngine::init_background_pipelines()
 	VkShaderModule gradientShader;
 	if (!vkutil::load_shader_module("gradient_color.comp", device, &gradientShader)) {
 		fmt::print("Error when building the compute shader \n");
+		abort();
 	}
 
 	VkShaderModule skyShader;
 	if (!vkutil::load_shader_module("sky.comp", device, &skyShader)) {
         fmt::print("Error when building the compute shader\n");
+		abort();
 	}
 
 	VkPipelineShaderStageCreateInfo stageinfo{};
@@ -396,14 +414,17 @@ void VulkanEngine::defer_destroy(VkSampler sampler) {
 
 void VulkanEngine::draw()
 {
-	if (_timelineValue > 0) {
+	// Wait for the submit that last used this frame slot (FRAME_OVERLAP frames ago),
+	// so the CPU can record this frame while the GPU works on the previous one.
+	uint64_t waitValue = get_current_frame()._frameTimelineValue;
+	if (waitValue > 0) {
 		VkSemaphoreWaitInfo waitInfo{};
 		waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
 		waitInfo.pNext = nullptr;
 		waitInfo.flags = 0;
 		waitInfo.semaphoreCount = 1;
 		waitInfo.pSemaphores = &_timelineSemaphore;
-		waitInfo.pValues = &_timelineValue;
+		waitInfo.pValues = &waitValue;
 
 		VK_CHECK(vkWaitSemaphores(device, &waitInfo, 1000000000));
 	}
@@ -650,33 +671,36 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
     MaterialInstance* lastMaterial = nullptr;
     VkBuffer lastIndexBuffer = VK_NULL_HANDLE;
 
+    auto bindPipeline = [&](MaterialPipeline* pipeline) {
+        lastPipeline = pipeline;
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->pipeline);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->layout, 0, 1,
+            &get_current_frame().globalDescriptor, 0, nullptr);
+
+        VkViewport viewport = {};
+        viewport.x = 0;
+        viewport.y = 0;
+        viewport.width = (float)drawExtent.width;
+        viewport.height = (float)drawExtent.height;
+        viewport.minDepth = 0.f;
+        viewport.maxDepth = 1.f;
+
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+        VkRect2D scissor = {};
+        scissor.offset.x = 0;
+        scissor.offset.y = 0;
+        scissor.extent.width = drawExtent.width;
+        scissor.extent.height = drawExtent.height;
+
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
+    };
+
     auto draw = [&](const RenderObject& r) {
         if (r.material != lastMaterial) {
             lastMaterial = r.material;
             if (r.material->pipeline != lastPipeline) {
-
-                lastPipeline = r.material->pipeline;
-                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r.material->pipeline->pipeline);
-                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,r.material->pipeline->layout, 0, 1,
-                    &get_current_frame().globalDescriptor, 0, nullptr);
-
-				VkViewport viewport = {};
-				viewport.x = 0;
-				viewport.y = 0;
-				viewport.width = (float)drawExtent.width;
-				viewport.height = (float)drawExtent.height;
-				viewport.minDepth = 0.f;
-				viewport.maxDepth = 1.f;
-
-				vkCmdSetViewport(cmd, 0, 1, &viewport);
-
-				VkRect2D scissor = {};
-				scissor.offset.x = 0;
-				scissor.offset.y = 0;
-				scissor.extent.width = drawExtent.width;
-				scissor.extent.height = drawExtent.height;
-
-				vkCmdSetScissor(cmd, 0, 1, &scissor);
+                bindPipeline(r.material->pipeline);
             }
         }
         if (r.indexBuffer != lastIndexBuffer) {
@@ -710,7 +734,9 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
         draw(drawCommands.OpaqueSurfaces[r]);
     }
 
-	auto someData = drawCommands.OpaqueSurfaces[0];
+	if (!importedModels.empty() && lastPipeline != &metalRoughMaterial.opaquePipeline) {
+		bindPipeline(&metalRoughMaterial.opaquePipeline);
+	}
 
 	for (auto& modelPtr : importedModels) {
 		Model& model = *modelPtr;
@@ -723,11 +749,16 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
 			GPUDrawPushConstants push_constants{};
 			push_constants.worldMatrix = glm::identity<glm::mat4>();
 			push_constants.vertexBuffer = meshBuffer.vertexBufferAddress;
-			vkCmdPushConstants(cmd, someData.material->pipeline->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
+			push_constants.materialBuffer = defaultMaterialAddress;
+			vkCmdPushConstants(cmd, metalRoughMaterial.opaquePipeline.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
 
+			stats.drawcall_count++;
+			stats.triangle_count += meshData.indices.size() / 3;
 			vkCmdDrawIndexed(cmd, meshData.indices.size(), 1, 0, 0, 0);
 		}
 	}
+	lastIndexBuffer = VK_NULL_HANDLE;
+	lastMaterial = nullptr;
 
     // Dynamic state: transparent pass — no cull, depth test on but writes off
     vkCmdSetCullMode(cmd, VK_CULL_MODE_NONE);
@@ -1408,12 +1439,14 @@ void GLTFMetallic_Roughness::build_pipelines(VulkanEngine* engine)
 {
 	VkShaderModule meshFragShader;
 	if (!vkutil::load_shader_module("basic.frag", engine->device, &meshFragShader)) {
-		fmt::println("Error when building the triangle fragment shader module");
+		fmt::println("Error when building the triangle fragment shader module\n");
+		abort();
 	}
 
 	VkShaderModule meshVertexShader;
 	if (!vkutil::load_shader_module("basic.vert", engine->device, &meshVertexShader)) {
 		fmt::println("Error when building the triangle vertex shader module");
+		abort();
 	}
 
 	VkPushConstantRange matrixRange{};
@@ -1531,8 +1564,9 @@ void VulkanEngine::init_post_process_pipeline() {
 	VK_CHECK(vkCreateImageView(device, &rview_info, nullptr, &postProcessingImage.imageView));
 
 	VkShaderModule computeShader;
-	if (!vkutil::load_shader_module("post_process_comp", device, &computeShader)) {
-		fmt::print("Error when loading the post_process compute shader module");
+	if (!vkutil::load_shader_module("post_process.comp", device, &computeShader)) {
+		fmt::print("Error when loading the post_process compute shader module\n");
+		abort();
 	}
 
 	VkPipelineShaderStageCreateInfo stageinfo{};
@@ -1560,9 +1594,10 @@ void VulkanEngine::sendModelDataToGpu(Model& model) {
 	}
 
 	for (auto& [path, textureInfo] : model.alreadyLoadedImages) {
-		VkExtent3D imageExtent = {(uint32_t) textureInfo.height, (uint32_t) textureInfo.width, 1};
+		VkExtent3D imageExtent = {(uint32_t) textureInfo.width, (uint32_t) textureInfo.height, 1};
 		bool shouldBeMipmapped = imageExtent.width > 2 && imageExtent.height > 2;
-		auto gpuTexture = create_image(textureInfo.data, imageExtent, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, shouldBeMipmapped);
+		VkFormat textureFormat = textureInfo.type == "texture_diffuse" ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+		auto gpuTexture = create_image(textureInfo.data, imageExtent, textureFormat, VK_IMAGE_USAGE_SAMPLED_BIT, shouldBeMipmapped);
 
 		model.gpuTextures[path] = std::move(gpuTexture);
 	}
@@ -1592,7 +1627,7 @@ void VulkanEngine::handleImGui() {
 
 	ComputeEffect& selected = backgroundEffects[currentBackgroundEffect];
 
-	ImGui::Text("Selected effect: ", selected.name);
+	ImGui::Text("Selected effect: %s",selected.name);
 
 	ImGui::SliderInt("Effect Index", &currentBackgroundEffect, 0, backgroundEffects.size() - 1);
 
