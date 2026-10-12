@@ -16,6 +16,18 @@
 #include <fastgltf/util.hpp>
 
 #include "utils/util.h"
+
+// Returns name if unused in the map, otherwise name + "#" + index, so unnamed or duplicate glTF names don't collide.
+template <typename Map>
+std::string uniqueKey(const Map& map, std::string_view name, size_t index)
+{
+    std::string key(name.empty() ? "unnamed" : name);
+    if (map.contains(key)) {
+        key += "#" + std::to_string(index);
+    }
+    return key;
+}
+
 std::optional<AllocatedImage> loadImage(VulkanEngine* engine, fastgltf::Asset& asset, fastgltf::Image& image, UploadBatch& batch, VkFormat format)
 {
     AllocatedImage newImage {};
@@ -215,8 +227,8 @@ std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::
         std::optional<AllocatedImage> img = loadImage(engine, gltf, image, batch, format);
 
         if (img.has_value()) {
-            file.images[image.name.c_str()] = std::move(*img);
-            images.push_back(&file.images[image.name.c_str()]);
+            std::string key = uniqueKey(file.images, image.name, imageIdx);
+            images.push_back(&(file.images[key] = std::move(*img)));
         } else {
             // we failed to load, so lets give the slot a default white texture to not
             // completely break loading
@@ -226,7 +238,7 @@ std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::
     }
 
     // create buffer to hold the material data
-    file.materialDataBuffer = vkutil::createBuffer(engine->allocator, sizeof(GPUGLTFMaterial) * gltf.materials.size(),
+    file.materialDataBuffer = vkutil::createBuffer(engine->allocator, sizeof(GPUGLTFMaterial) * (gltf.materials.size() + 1),
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, vkutil::HOST_WRITE_MAPPED);
 
     VkBufferDeviceAddressInfo deviceAddressInfo{ .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = file.materialDataBuffer.buffer };
@@ -238,7 +250,7 @@ std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::
     for (fastgltf::Material& mat : gltf.materials) {
         std::shared_ptr<GLTFMaterial> newMat = std::make_shared<GLTFMaterial>();
         materials.push_back(newMat);
-        file.materials[mat.name.c_str()] = newMat;
+        file.materials[uniqueKey(file.materials, mat.name, materials.size() - 1)] = newMat;
 
         GPUGLTFMaterial constants{};
         constants.colorFactors.x = mat.pbrData.baseColorFactor[0];
@@ -257,18 +269,20 @@ std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::
         // grab textures from gltf file
         if (mat.pbrData.baseColorTexture.has_value()) {
             size_t img = gltf.textures[mat.pbrData.baseColorTexture.value().textureIndex].imageIndex.value();
-            size_t sampler = gltf.textures[mat.pbrData.baseColorTexture.value().textureIndex].samplerIndex.value();
+            auto samplerIndex = gltf.textures[mat.pbrData.baseColorTexture.value().textureIndex].samplerIndex;
+            VkSampler sampler = samplerIndex.has_value() ? file.samplers[*samplerIndex] : engine->defaultSamplerLinear;
 
-            constants.colorTexID = engine->addGlobalTexture(images[img]->imageView, file.samplers[sampler]);
+            constants.colorTexID = engine->addGlobalTexture(images[img]->imageView, sampler);
         } else {
             constants.colorTexID = engine->addGlobalTexture(engine->whiteImage.imageView, engine->defaultSamplerLinear);
         }
 
         if (mat.pbrData.metallicRoughnessTexture.has_value()) {
             size_t img = gltf.textures[mat.pbrData.metallicRoughnessTexture.value().textureIndex].imageIndex.value();
-            size_t sampler = gltf.textures[mat.pbrData.metallicRoughnessTexture.value().textureIndex].samplerIndex.value();
+            auto samplerIndex = gltf.textures[mat.pbrData.metallicRoughnessTexture.value().textureIndex].samplerIndex;
+            VkSampler sampler = samplerIndex.has_value() ? file.samplers[*samplerIndex] : engine->defaultSamplerLinear;
 
-            constants.metalRoughTexID = engine->addGlobalTexture(images[img]->imageView, file.samplers[sampler]);
+            constants.metalRoughTexID = engine->addGlobalTexture(images[img]->imageView, sampler);
         } else {
             constants.metalRoughTexID = engine->addGlobalTexture(engine->whiteImage.imageView, engine->defaultSamplerLinear);
         }
@@ -284,6 +298,24 @@ std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::
         data_index++;
     }
 
+    // primitives without a material use the glTF default material
+    {
+        std::shared_ptr<GLTFMaterial> defaultMat = std::make_shared<GLTFMaterial>();
+        materials.push_back(defaultMat);
+        file.materials[uniqueKey(file.materials, "default", materials.size() - 1)] = defaultMat;
+
+        GPUGLTFMaterial constants{};
+        constants.colorFactors = glm::vec4(1.f);
+        constants.metal_rough_factors = glm::vec4(1.f, 1.f, 0.f, 0.f);
+        constants.colorTexID = engine->addGlobalTexture(engine->whiteImage.imageView, engine->defaultSamplerLinear);
+        constants.metalRoughTexID = engine->addGlobalTexture(engine->whiteImage.imageView, engine->defaultSamplerLinear);
+        sceneMaterialConstants[data_index] = constants;
+
+        defaultMat->data.passType = MaterialPass::MainColor;
+        defaultMat->data.pipeline = &engine->metalRoughMaterial.opaquePipeline;
+        defaultMat->data.materialBuffer = materialBufferAddress + (data_index * sizeof(GPUGLTFMaterial));
+    }
+
     // all meshes in the file share one vertex buffer and one index buffer
     std::vector<uint32_t> indices;
     std::vector<Vertex> vertices;
@@ -291,7 +323,7 @@ std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::
     for (fastgltf::Mesh& mesh : gltf.meshes) {
         std::shared_ptr<MeshAsset> newmesh = std::make_shared<MeshAsset>();
         meshes.push_back(newmesh);
-        file.meshes[mesh.name.c_str()] = newmesh;
+        file.meshes[uniqueKey(file.meshes, mesh.name, meshes.size() - 1)] = newmesh;
         newmesh->name = mesh.name;
 
         for (auto&& p : mesh.primitives) {
@@ -363,7 +395,7 @@ std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::
             if (p.materialIndex.has_value()) {
                 newSurface.material = materials[p.materialIndex.value()];
             } else {
-                newSurface.material = materials[0];
+                newSurface.material = materials[gltf.materials.size()];
             }
 
             glm::vec3 minpos = vertices[initial_vtx].position;
@@ -400,7 +432,7 @@ std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::
         }
 
         nodes.push_back(newNode);
-        file.nodes[node.name.c_str()];
+        file.nodes[uniqueKey(file.nodes, node.name, nodes.size() - 1)] = newNode;
 
         std::visit(fastgltf::visitor { [&](fastgltf::Node::TransformMatrix matrix) {
                                           memcpy(&newNode->localTransform, matrix.data(), sizeof(matrix));

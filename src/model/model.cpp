@@ -116,14 +116,33 @@ std::vector<std::string> Model::loadMaterialTextures(const aiScene *scene, const
         auto foundImage = alreadyLoadedImages.find(finalPath);
         if (foundImage == alreadyLoadedImages.end()) {
             const aiTexture* embeddedTexture = scene->GetEmbeddedTexture(str.C_Str());
-            auto totalSize = 0;
-            void* embeddedData = nullptr;
-            if (embeddedTexture) {
-                totalSize = embeddedTexture->mHeight * embeddedTexture->mWidth;
-                embeddedData = embeddedTexture->pcData;
+            std::optional<TextureInfo> textureResult;
+            if (embeddedTexture && embeddedTexture->mHeight == 0) {
+                // compressed image, mWidth is its size in bytes
+                textureResult = loadTexture(finalPath.c_str(), embeddedTexture->pcData, embeddedTexture->mWidth);
+            } else if (embeddedTexture) {
+                // raw texels, converted to RGBA
+                const size_t texelCount = static_cast<size_t>(embeddedTexture->mWidth) * embeddedTexture->mHeight;
+                auto* pixels = static_cast<unsigned char*>(malloc(texelCount * 4));
+                if (pixels) {
+                    for (size_t t = 0; t < texelCount; t++) {
+                        const aiTexel& texel = embeddedTexture->pcData[t];
+                        pixels[t * 4 + 0] = texel.r;
+                        pixels[t * 4 + 1] = texel.g;
+                        pixels[t * 4 + 2] = texel.b;
+                        pixels[t * 4 + 3] = texel.a;
+                    }
+                    TextureInfo rawInfo;
+                    rawInfo.data = pixels;
+                    rawInfo.width = embeddedTexture->mWidth;
+                    rawInfo.height = embeddedTexture->mHeight;
+                    rawInfo.channels = 4;
+                    textureResult = std::move(rawInfo);
+                }
+            } else {
+                textureResult = loadTexture(finalPath.c_str(), nullptr, 0);
             }
 
-            auto textureResult = loadTexture(finalPath.c_str(), embeddedData, totalSize);
             if (textureResult.has_value()) {
                 auto textureInfo = std::move(textureResult.value());
                 textureInfo.type = typeName;
