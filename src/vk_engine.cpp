@@ -194,6 +194,7 @@ void VulkanEngine::cleanup()
 	vkDestroySemaphore(device, _timelineSemaphore, nullptr);
 
 	vkDestroyCommandPool(device, immCommandPool, nullptr);
+	gpuProfiler.destroy(device);
 	vkDestroyFence(device, immFence, nullptr);
 
 	if (defaultSamplerLinear != VK_NULL_HANDLE) {
@@ -313,7 +314,9 @@ void VulkanEngine::init_background_pipelines()
 void VulkanEngine::draw_main(VkCommandBuffer cmd)
 {
 	ComputeEffect& effect = backgroundEffects[currentBackgroundEffect];
+	const uint32_t slot = get_current_frame_slot();
 
+	gpuProfiler.begin(cmd, slot, GpuPass::Background);
 	// bind the background compute pipeline
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, effect.pipeline);
 
@@ -323,9 +326,11 @@ void VulkanEngine::draw_main(VkCommandBuffer cmd)
 	vkCmdPushConstants(cmd, gradientPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputePushConstants), &effect.data);
 	// execute the compute pipeline dispatch. We are using 16x16 workgroup size so we need to divide by it
 	vkCmdDispatch(cmd, (uint32_t)std::ceil(drawExtent.width / 16.0), (uint32_t)std::ceil(drawExtent.height / 16.0), 1);
+	gpuProfiler.end(cmd, slot, GpuPass::Background);
 
 	//draw the triangle
 
+	gpuProfiler.begin(cmd, slot, GpuPass::Geometry);
 	vkutil::transition_image_for_color_attachment(cmd, drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
 	VkClearValue clearValue{};
@@ -345,6 +350,7 @@ void VulkanEngine::draw_main(VkCommandBuffer cmd)
 	stats.geometry_record_time = elapsed.count() / 1000.f;
 
 	vkCmdEndRendering(cmd);
+	gpuProfiler.end(cmd, slot, GpuPass::Geometry);
 }
 
 void VulkanEngine::draw_imgui(VkCommandBuffer cmd, VkImageView targetImageView)
@@ -429,6 +435,9 @@ void VulkanEngine::draw()
 		VK_CHECK(vkWaitSemaphores(device, &waitInfo, 1000000000));
 	}
 
+	const uint32_t slot = get_current_frame_slot();
+	gpuProfiler.collect(device, slot);
+
 	get_current_frame()._garbage.flush(device, allocator);
 	//request image from the swapchain
 	uint32_t swapchainImageIndex;
@@ -454,6 +463,7 @@ void VulkanEngine::draw()
 
 	//> draw_first
 	VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
+	gpuProfiler.reset(cmd, slot);
 
 	// transition our main draw image into general layout so we can write into it
 	// we will overwrite it all so we dont care about what was the older layout
@@ -472,6 +482,7 @@ void VulkanEngine::draw()
 	draw_main(cmd);
 
 	//transition the draw image and post processing image to GENERAL for compute
+	gpuProfiler.begin(cmd, slot, GpuPass::Tonemap);
 	vkutil::transition_image(cmd, drawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
 		VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
 		VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
@@ -502,7 +513,10 @@ void VulkanEngine::draw()
 
 	vkCmdDispatch(cmd, (uint32_t)std::ceil(drawExtent.width / 16.0), (uint32_t)std::ceil(drawExtent.height / 16.0), 1);
 
+	gpuProfiler.end(cmd, slot, GpuPass::Tonemap);
+
 	//transition the post processing image and the swapchain image into their correct transfer layouts
+	gpuProfiler.begin(cmd, slot, GpuPass::Blit);
 	vkutil::transition_image(cmd, postProcessingImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 		VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
 		VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
@@ -528,7 +542,10 @@ void VulkanEngine::draw()
 	// execute a copy from the post processing image into the swapchain
     vkutil::copy_image_to_image(cmd, postProcessingImage.image, swapchainImages[swapchainImageIndex], drawExtent,swapchainExtent);
 
+	gpuProfiler.end(cmd, slot, GpuPass::Blit);
+
 	// set swapchain image layout to Attachment Optimal so we can draw it
+	gpuProfiler.begin(cmd, slot, GpuPass::Ui);
 	vkutil::transition_image(
 		cmd,
 		swapchainImages[swapchainImageIndex],
@@ -541,6 +558,7 @@ void VulkanEngine::draw()
 
 	//draw imgui into the swapchain image
 	draw_imgui(cmd, swapchainImageViews[swapchainImageIndex]);
+	gpuProfiler.end(cmd, slot, GpuPass::Ui);
 
 	// set swapchain image layout to Present so we can draw it
 	vkutil::transition_image(
@@ -1077,6 +1095,8 @@ void VulkanEngine::init_vulkan()
     graphicsQueue = vkbDevice.get_queue(vkb::QueueType::graphics).value();
 
     graphicsQueueFamily = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
+
+    gpuProfiler.init(instance, device, chosenGPU, graphicsQueueFamily, FRAME_OVERLAP);
 
     // initialize the memory allocator
     VmaAllocatorCreateInfo allocatorInfo = {};
@@ -1618,6 +1638,17 @@ void VulkanEngine::handleImGui() {
 
 	ImGui::Text("frametime %f ms", stats.frametime);
 	ImGui::Text("geometry record (CPU) %f ms", stats.geometry_record_time);
+
+	if (gpuProfiler.supported()) {
+		ImGui::SeparatorText("GPU (ms)");
+		ImGui::Text("total %.3f", gpuProfiler.total_ms());
+		for (uint32_t i = 0; i < (uint32_t)GpuPass::Count; i++) {
+			GpuPass p = (GpuPass)i;
+			ImGui::Text("%s %.3f", GpuProfiler::pass_name(p), gpuProfiler.pass_ms(p));
+		}
+	} else {
+		ImGui::Text("GPU timestamps not supported");
+	}
 
 	const char* presentModeNames[] = { "FIFO (vsync)", "MAILBOX", "IMMEDIATE" };
 	const VkPresentModeKHR presentModes[] = { VK_PRESENT_MODE_FIFO_KHR, VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR };

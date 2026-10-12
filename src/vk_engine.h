@@ -17,6 +17,7 @@
 #include <vk_mem_alloc.h>
  
 #include <camera.h>
+#include "gpu_profiler.h"
 #include <vk_descriptors.h>
 #include <vk_loader.h>
 #include <vk_pipelines.h>
@@ -214,6 +215,7 @@ public:
     Camera mainCamera;
 
     EngineStats stats;
+    GpuProfiler gpuProfiler;
 
 	std::vector<std::unique_ptr<Model>> importedModels;
 
@@ -253,6 +255,7 @@ public:
 
     FrameData& get_current_frame();
     FrameData& get_last_frame();
+    uint32_t get_current_frame_slot() const { return frameNumber % FRAME_OVERLAP; }
 
     AllocatedImage create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
     AllocatedImage create_image(VkCommandBuffer cmd, std::vector<AllocatedBuffer>& stagingBuffers, void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
