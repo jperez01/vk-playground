@@ -2,6 +2,8 @@
 # Add source to this project's executable.
 add_library (vkguide_shared STATIC
   vk_types.h
+  runtime_paths.h
+  runtime_paths.cpp
   vk_initializers.cpp
   vk_initializers.h
   vk_images.h
@@ -20,7 +22,6 @@ add_library (vkguide_shared STATIC
 
 set_property(TARGET vkguide_shared PROPERTY CXX_STANDARD 20)
 target_compile_definitions(vkguide_shared PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
-target_compile_definitions(vkguide_shared PUBLIC SHADER_DIR="${PROJECT_SOURCE_DIR}/spirv/")
 
 target_include_directories(vkguide_shared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 

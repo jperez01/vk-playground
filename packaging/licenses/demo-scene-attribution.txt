@@ -1,0 +1,18 @@
+Demo scene: Polygonal Mind, Tomb Chaser 1, Layout_Floor01.
+
+Source GLB conversion collection: anishthite/cc0-models-Polygonal-Mind
+Pinned revision: 56db2d4088512531a070d0bf3eb9d284d077528d
+Source file:
+https://github.com/anishthite/cc0-models-Polygonal-Mind/blob/56db2d4088512531a070d0bf3eb9d284d077528d/projects/tomb-chaser-1/Layout_Floor01.glb
+
+A parent node translates the scene by [30, -12, -150] to frame it with the
+renderer's existing starting camera. Geometry, textures and binary chunks
+are unchanged. The prepared scene is installed as assets/structure.glb.
+Original and prepared SHA256 values are recorded in build-info.txt.
+
+The collection README identifies its models as CC0:
+https://raw.githubusercontent.com/anishthite/cc0-models-Polygonal-Mind/56db2d4088512531a070d0bf3eb9d284d077528d/README.md
+
+The collection's verbatim CC0 notice accompanies this attribution in
+demo-scene-CC0.txt. Its source is:
+https://raw.githubusercontent.com/anishthite/cc0-models-Polygonal-Mind/56db2d4088512531a070d0bf3eb9d284d077528d/License.md

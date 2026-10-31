@@ -4,6 +4,9 @@
 #include "vk_loader.h"
 #include "vk_descriptors.h"
 #include "upload_batch.h"
+#include "runtime_paths.h"
+#include "runtime_shader_files.h"
+#include <stdexcept>
 
 #include <SDL.h>
 #include <SDL_vulkan.h>
@@ -33,6 +36,17 @@ constexpr bool bUseValidationLayers = true;
 
 void VulkanEngine::init()
 {
+    const auto structurePath = vkutil::runtimePath("assets/structure.glb");
+    if (!std::filesystem::is_regular_file(structurePath)) {
+        throw std::runtime_error("Missing default scene: " + structurePath.string());
+    }
+    for (const char* shaderFile : runtimeShaderFiles) {
+        const auto shaderPath = vkutil::runtimePath(shaderFile);
+        if (!std::filesystem::is_regular_file(shaderPath)) {
+            throw std::runtime_error("Missing shader: " + shaderPath.string());
+        }
+    }
+
     // We initialize SDL and create a window with it.
     SDL_Init(SDL_INIT_VIDEO);
 
@@ -55,9 +69,16 @@ void VulkanEngine::init()
 
 	initPipelines();
 
-    initRenderables();
-
     initImGui();
+
+    // Scene loading can fail after device resources exist. At this point all
+    // subsystems needed by cleanup() are initialized.
+    try {
+        initRenderables();
+    } catch (...) {
+        cleanup();
+        throw;
+    }
 }
 
 void VulkanEngine::initDefaultData() {
@@ -985,10 +1006,12 @@ void VulkanEngine::initSyncStructures()
 void VulkanEngine::initRenderables()
 {
 	auto structureStart = std::chrono::steady_clock::now();
-    std::string structurePath = std::string(ASSET_DIR) + "structure.glb";
-    auto structureFile = loadGltf(this,structurePath);
+    const auto structurePath = vkutil::runtimePath("assets/structure.glb");
+    auto structureFile = loadGltf(this, structurePath.string());
 
-    assert(structureFile.has_value());
+    if (!structureFile) {
+        throw std::runtime_error("Failed to load default scene: " + structurePath.string());
+    }
 
     loadedScenes["structure"] = *structureFile;
 	auto structureEnd = std::chrono::steady_clock::now();

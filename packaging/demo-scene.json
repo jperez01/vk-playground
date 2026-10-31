@@ -1,0 +1,13 @@
+{
+  "name": "Tomb Chaser 1 - Layout Floor 01",
+  "author": "Polygonal Mind",
+  "collection": "anishthite/cc0-models-Polygonal-Mind",
+  "revision": "56db2d4088512531a070d0bf3eb9d284d077528d",
+  "url": "https://raw.githubusercontent.com/anishthite/cc0-models-Polygonal-Mind/56db2d4088512531a070d0bf3eb9d284d077528d/projects/tomb-chaser-1/Layout_Floor01.glb",
+  "sha256": "96f55dcff0453e9135bfe7bbd70d53b99f4bbd11b2ff677ee972f0ba60fbef2b",
+  "license": "CC0-1.0",
+  "license_url": "https://raw.githubusercontent.com/anishthite/cc0-models-Polygonal-Mind/56db2d4088512531a070d0bf3eb9d284d077528d/License.md",
+  "permission_source": "https://raw.githubusercontent.com/anishthite/cc0-models-Polygonal-Mind/56db2d4088512531a070d0bf3eb9d284d077528d/README.md",
+  "translation": [30, -12, -150],
+  "modifications": "A parent node translates the scene by [30, -12, -150] to frame it with the existing demo camera. Geometry and textures are unchanged. Installed as assets/structure.glb."
+}
