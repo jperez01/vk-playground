@@ -1,0 +1,30 @@
+{
+  "msvc": {
+    "visual_studio_version_range": "[17.0,18.0)",
+    "default_toolset_family": "14.44",
+    "source": "https://github.com/actions/runner-images/blob/main/images/windows/Windows2022-Readme.md"
+  },
+  "vulkan_sdk": {
+    "version": "1.4.350.0",
+    "url": "https://sdk.lunarg.com/sdk/download/1.4.350.0/windows/vulkansdk-windows-X64-1.4.350.0.exe",
+    "sha256": "855b27ba05d2d8119c5114c5d4ff870ca38f2c632b11e1bb9923b9b7e6ecfe7b",
+    "checksum_source": "https://vulkan.lunarg.com/sdk/files.json",
+    "installation_instructions": "https://vulkan.lunarg.com/doc/view/1.4.350.0/windows/getting_started.html"
+  },
+  "cmake": {
+    "version": "3.31.6",
+    "url": "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-windows-x86_64.zip",
+    "sha256": "d163cd3ab4959b0a53fa8988f2ddbd2e6c501658201e6a154386bad9dbe4f836",
+    "checksum_source": "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-SHA-256.txt"
+  },
+  "ninja": {
+    "version": "1.13.2",
+    "url": "https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-win.zip",
+    "sha256": "07fc8261b42b20e71d1720b39068c2e14ffcee6396b76fb7a795fb460b78dc65",
+    "checksum_source": "https://api.github.com/repos/ninja-build/ninja/releases/assets/318863577"
+  },
+  "vcpkg": {
+    "url": "https://github.com/microsoft/vcpkg.git",
+    "ref": "c82f74667287d3dc386bce81e44964370c91a289"
+  }
+}

@@ -5,6 +5,11 @@ cmake_minimum_required (VERSION 3.21)
 
 project ("vulkan_guide")
 
+find_program(SLANGC NAMES slangc HINTS "$ENV{VULKAN_SDK}/Bin" REQUIRED)
+if(NOT EXISTS "${SLANGC}")
+    message(FATAL_ERROR "Slang compiler does not exist: ${SLANGC}")
+endif()
+
 find_package(Vulkan REQUIRED)
 
 add_subdirectory(third_party)
@@ -19,7 +24,6 @@ set (CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
 add_subdirectory(shared)
 
 add_subdirectory(src)
-find_program(SLANGC slangc)
 
 file(MAKE_DIRECTORY "${PROJECT_SOURCE_DIR}/spirv")
 file(GLOB_RECURSE SLANG_SOURCE_FILES

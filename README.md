@@ -83,9 +83,19 @@ Do not run IDE builds concurrently. Packaging shares the smoke harness mutex and
 
 Recipients extract the entire archive and run `demo.exe`. They need a compatible Vulkan 1.3 GPU/driver with the required descriptor, device-address, timeline and push-descriptor features (detailed in the packaged README); they do not need build tools or the Vulkan SDK. The system Vulkan loader/driver is not bundled. This executable is unsigned; Windows may display reputation warnings.
 
-Before sharing, smoke-check the **extracted archive** outside the checkout, inspect actual rendering, resize/minimize/restore, and close normally. Use Debug with validation separately; an optimized ZIP passing compilation or launch does not prove Vulkan correctness. Existing presentation/cleanup validation failures remain documented below. GitHub publication workflows are not implemented yet.
+Before sharing, smoke-check the **extracted archive** outside the checkout, inspect actual rendering, resize/minimize/restore, and close normally. Use Debug with validation separately; an optimized ZIP passing compilation or launch does not prove Vulkan correctness. Existing presentation/cleanup validation failures remain documented below.
 
 See [the demo distribution plan](docs/DEMO_DISTRIBUTION_PLAN.md) for completed changes, verification evidence, remaining GitHub Actions/release work, and acceptance criteria.
+
+### GitHub development builds and draft releases
+
+The **Windows demo build** workflow runs for PRs targeting `master`, pushes to `master`, and manual dispatches. Open [Actions](https://github.com/jperez01/vk-playground/actions/workflows/build-windows.yml), select a successful run, and download its `windows-x64-<commit>` artifact. Unzip the Actions artifact first, then extract the demo ZIP inside it. GitHub sign-in is required for Actions downloads; artifacts and separate diagnostic logs are retained for 14 days.
+
+The workflows use `windows-2022`, enforce the VS2022 MSVC 14.44 family, and provision checksum-pinned Vulkan SDK/Slang, CMake and Ninja versions plus a pinned vcpkg checkout. Full compiler version/toolchain evidence accompanies each run; the runner image itself can receive updates. Development jobs have read-only repository permissions, including PR jobs.
+
+To prepare a release, create and push a version tag such as `v0.1.0` for the intended commit. The **Windows demo draft release** workflow builds that tag through the same packaging command, verifies its ZIP/checksum and source identity, and creates a **draft** under [Releases](https://github.com/jperez01/vk-playground/releases). Tags must be `vMAJOR.MINOR.PATCH` with an optional SemVer prerelease suffix; prerelease tags produce draft prereleases. Existing releases are not overwritten on a rerun.
+
+Download and verify the exact candidate on supported GPU hardware before manually publishing the draft. CI proves build/package automation, not rendering or Vulkan correctness. Only the final publishing job has release-write permission; it does not build or execute downloaded package contents. Manual dispatch becomes available after the workflow exists on `master`.
 
 
 ### omp code intelligence

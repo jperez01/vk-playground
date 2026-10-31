@@ -1,0 +1,60 @@
+name: Windows demo draft release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build tagged Windows x64 demo
+    runs-on: windows-2022
+    timeout-minutes: 60
+    outputs:
+      commit: ${{ steps.package.outputs.commit }}
+      artifact-name: ${{ steps.package.outputs.artifact-name }}
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Build and upload release candidate
+        id: package
+        uses: ./.github/actions/package-windows
+        with:
+          version: ${{ github.ref_name }}
+
+  draft-release:
+    name: Create draft release from verified artifacts
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Check out the exact built commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.build.outputs.commit }}
+          persist-credentials: false
+      - name: Download this run's release candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: out/release-candidate
+      - name: Verify candidate identity and create draft
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ needs.build.outputs.commit }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: |
+          ./scripts/ci/publish-demo-release.ps1 -ArtifactDirectory out/release-candidate -Tag $env:RELEASE_TAG -Commit $env:RELEASE_COMMIT -Repository $env:RELEASE_REPOSITORY

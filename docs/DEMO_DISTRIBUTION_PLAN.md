@@ -1,6 +1,6 @@
 # Windows demo distribution plan
 
-Status: steps 1 and 2 implemented; GitHub automation and release publication remain.
+Status: steps 1–2 complete; step 3 automation implemented with hosted verification in progress. First public release acceptance remains step 4.
 Last updated: 2026-10-31.
 
 ## Goal and conventions
@@ -88,17 +88,21 @@ Local evidence directories under `%TEMP%`:
 
 These are workstation-local evidence, not repository files or durable CI links. Temporary smoke scripts/runtime copies were removed; logs/screenshots were retained.
 
-## Step 3 — GitHub builds and publication: remaining
+## Step 3 — GitHub builds and publication: implemented, hosted verification in progress
 
-1. Add `.github/workflows/build-windows.yml` for PRs to `master`, pushes to `master`, and manual dispatch.
-2. Pin the Windows runner image, action revisions, Vulkan SDK/Slang toolchain and vcpkg checkout. Retain the manifest's dependency baseline and cache dependencies with toolchain/manifest-sensitive keys.
-3. Configure a fresh Windows x64 MSVC optimized tree without requiring the untracked local reactor asset. Fail configuration clearly if Slang is missing.
-4. Invoke `scripts/package-demo.ps1`; upload the ZIP, checksum and useful logs with explicit artifact names and retention. Record source identity; never publish a partial package.
-5. Keep PR jobs read-only with respect to release publication. Do not expose release-write credentials to untrusted PR code.
-6. Add `.github/workflows/release-windows.yml` for version tags. Build the tagged commit through the same command and create a **draft** GitHub Release containing the ZIP/checksum, source identity and release notes. Grant write permission only to the publishing job.
-7. Exercise the workflows on GitHub, including a PR build, default-branch artifact download, failure diagnostics and a tagged draft release. Local scripts alone are not proof that CI works.
+- `.github/workflows/build-windows.yml`: build PRs targeting `master`, pushes to `master`, and manual dispatches. Upload the development ZIP/checksum and separate diagnostics with 14-day retention.
+- `.github/workflows/release-windows.yml`: build version tags, then create a draft release in a separate publishing job. Build jobs have `contents: read`; only the publisher gets `contents: write` and artifact-read permission.
+- `.github/actions/package-windows/action.yml`: share toolchain provisioning, vcpkg binary caching, fresh optimized configuration, the existing packaging command, and artifact upload between both workflows. PRs build the merge checkout; tagged builds use the tagged commit. There is no `pull_request_target` execution of PR code.
+- `scripts/ci/windows-toolchain.json` and `prepare-windows.ps1`: checksum-pin Vulkan SDK/Slang 1.4.350.0, CMake 3.31.6 and Ninja 1.13.2; pin the vcpkg checkout to the manifest baseline. Enforce the hosted VS2022 default MSVC 14.44 family and record the full selected compiler version in toolchain evidence/cache keys. `windows-2022` is a selected runner family, not an immutable image; MSVC patch updates are recorded rather than claimed to be bitwise pinned.
+- SDK installation is copy-only under the runner's temporary directory. Downloaded executables/archives are hash-verified before use; no existing local SDK or untracked reactor asset is required.
+- `scripts/ci/publish-demo-release.ps1`: verify package hash, expected archive/root names, clean-source build identity, tag version, configuration, architecture and remote tag target before draft creation. Handle annotated/lightweight tags, refuse an existing release, attach ZIP/checksum, mark prerelease versions appropriately, and never publish automatically.
+- Root CMake configuration now fails early for a missing Slang compiler, including an invalid cached compiler path.
 
-Acceptance: each successful merge produces an identifiable development download; a version tag produces a draft release for a specific commit. No GPU-tested or validation-clean claim is inferred from hosted-runner build success.
+The vcpkg binary cache key includes the manifest/toolchain configuration, selected full MSVC version, SDK version, CMake version and pinned vcpkg revision. GitHub's branch/ref cache isolation keeps PR writes from becoming trusted default-branch caches. Configure, package and toolchain diagnostics are uploaded even when a preceding build step fails; only successful packaging uploads the distributable artifact.
+
+Local checks exercised: actionlint 1.7.12 accepted both workflows; PowerShell parsing passed; `-VerifyOnly` accepted a local metadata fixture and rejected a tampered checksum and mismatched commit without GitHub mutations. A fresh CMake configuration with a nonexistent cached Slang path failed with the expected compiler diagnostic. These checks do not replace a real hosted build or a real release-artifact verification.
+
+Hosted PR build/artifact and tagged draft-release verification are in progress. Default-branch push and manual-dispatch checks require the workflows to be merged into `master`; this change does not merge its own PR. No GPU-tested or validation-clean claim follows from hosted-runner success.
 
 ## Step 4 — release acceptance and first publication: remaining
 
