@@ -51,11 +51,12 @@ runs:
     - name: Configure optimized x64 build
       shell: cmd
       run: |
-        call "%CI_VCVARSALL%" x64 > out\ci-logs\configure.log 2>&1
-        if errorlevel 1 (type out\ci-logs\configure.log & exit /b 1)
-        cmake -S . -B out/ci-build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo "-DCMAKE_TOOLCHAIN_FILE=%CI_VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows >> out\ci-logs\configure.log 2>&1
+        call "%CI_VCVARSALL%" x64 > out\ci-logs\vcvars.log 2>&1
+        if errorlevel 1 (type out\ci-logs\vcvars.log & exit /b 1)
+        cmake -S . -B out/ci-build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo "-DCMAKE_TOOLCHAIN_FILE=%CI_VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows > out\ci-logs\configure.log 2>&1
         set CONFIGURE_EXIT=%errorlevel%
         type out\ci-logs\configure.log
+        if not exist out\ci-build\CMakeCache.txt exit /b 1
         exit /b %CONFIGURE_EXIT%
 
     - name: Build and package demo
