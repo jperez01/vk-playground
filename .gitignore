@@ -7,3 +7,12 @@ cmake-build-debug
 spirv/*
 vcpkg_installed
 build.bat
+
+# Generated build trees and IDE workspace state.
+/cmake-build-*/
+/.vs/
+/out/
+
+# Machine-local tool connections and executable-path overrides.
+/.omp/mcp.json
+/.lsp.json

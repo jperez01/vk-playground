@@ -49,6 +49,48 @@ Validation layers are on in Debug builds and off in Release and RelWithDebInfo.
 
 `assets/` isn't checked in. The default scene loads `assets/structure.glb` from the `assets` folder of the [vkguide repository](https://github.com/vblanco20-1/vulkan-guide). Put it in `assets/` at the repository root.
 
+### omp code intelligence
+
+`.omp/lsp.json` resolves standalone `clangd` from `PATH` and uses the compilation database in `cmake-build-relwithdebinfo-visual-studio`, matching CLion's RelWithDebInfo profile. Install LLVM/clangd on each machine and generate that build directory with `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` before using the LSP. If you use another build directory, update `--compile-commands-dir` accordingly.
+
+After changing the configuration, reload omp's native LSP with `action: "reload", file: "*"`. clangd runs independently of CLion; the separate CLion MCP connection requires the IDE to remain open.
+
+If clangd is not on `PATH`, create an ignored root `.lsp.json` containing a machine-local executable override; root LSP configuration takes precedence over `.omp/lsp.json`:
+
+```json
+{
+  "servers": {
+    "clangd": {
+      "command": "C:/path/to/LLVM/bin/clangd.exe"
+    }
+  }
+}
+```
+
+The project instructions, rules, skills, and portable `.omp/lsp.json` belong in Git. `.omp/mcp.json` stays ignored: configure CLion MCP separately on each machine using that IDE's current endpoint and local project path. Generated build trees (`cmake-build-*/`, `build/`, `out/`), binaries, compiled shaders, dependency installations, and IDE workspace state stay local; do not delete them merely to prepare a commit.
+
+Project conventions and verification entry points are in [`.omp/AGENTS.md`](.omp/AGENTS.md). The [renderer-check skill](.omp/skills/renderer-check/SKILL.md) covers Debug validation, visual/lifecycle checks, and optional optimized performance comparisons. After starting or restarting omp to discover the skill, invoke `/skill:renderer-check` with the feature or scenario to exercise.
+
+The [vulkan-review skill](.omp/skills/vulkan-review/SKILL.md) traces synchronization, resource ownership, barriers, and frame/swapchain lifetimes before targeted renderer verification. After restarting omp to discover it, use `/skill:vulkan-review review swapchain recreation and semaphore retirement`. It is read-only by default and reports concrete findings rather than applying fixes.
+
+### Renderer smoke check
+
+From the repository root on an interactive Windows desktop:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/renderer-smoke.ps1 -Profile Debug
+```
+
+Requires Windows PowerShell 5.1 or PowerShell 7, CMake on `PATH`, the existing selected CMake build directory, its MSVC/Vulkan SDK toolchain, and `assets/structure.glb`. The harness derives `vcvarsall.bat` from the cached compiler; pass `-VcVarsAll <path>` if needed. It uses built-in Windows/.NET APIs, not Python packages.
+
+The harness relinks the selected profile, captures build and renderer logs, saves screenshots before/after shrink, expand, and minimize/restore, then closes its own window normally. It refuses existing `demo.exe` processes, serializes other harness runs, and restores saved ImGui settings. Do not run an IDE build concurrently: profiles share `bin/`, and external builds do not participate in the harness lock.
+
+The printed evidence directory contains `report.json`, stdout/stderr logs, and four PNGs. Inspect the screenshots and exercise feature-specific UI separately; capture success alone is not visual proof. By default evidence goes to a new directory under Windows temporary storage; use `-OutputDirectory <new-path>` to retain it elsewhere, or `-SettleSeconds <1-30>` for slower machines. Review evidence before deleting it.
+
+Exit codes: **0** automated checks passed, **1** prerequisite/build failure, **2** runtime/capture/cleanup failure, **3** validation errors despite successful runtime checks. Runtime/build failures take precedence over validation failure. Warnings remain in the report/logs; repeated validation output may be capped by the layer. `-Profile RelWithDebInfo` is an additional optimized check and never reports validation as passed.
+
+The Debug smoke check currently exposes presentation synchronization and in-use swapchain/semaphore destruction errors. A successful launch/exit is not a validation pass; the harness does not suppress those diagnostics.
+
 ## Controls
 
 | Input | Action |

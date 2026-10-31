@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "clangd": {
+      "command": "clangd",
+      "args": [
+        "--compile-commands-dir=cmake-build-relwithdebinfo-visual-studio",
+        "--background-index"
+      ],
+      "fileTypes": [".c", ".h", ".cc", ".hh", ".cpp", ".hpp", ".cxx", ".hxx"],
+      "rootMarkers": ["CMakeLists.txt"]
+    }
+  }
+}
