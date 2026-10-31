@@ -1,6 +1,7 @@
 ﻿#include <vk_pipelines.h>
 
 #include "vk_initializers.h"
+#include "runtime_paths.h"
 #include <fstream>
 
 void PipelineBuilder::clear()
@@ -212,12 +213,12 @@ bool vkutil::loadShaderModule(const char* filePath,
     VkDevice device,
     VkShaderModule* outShaderModule)
 {
-    std::string finalPath = std::string(SHADER_DIR) + filePath + ".spv";
+    const auto finalPath = runtimePath(std::filesystem::path("spirv") / (std::string(filePath) + ".spv"));
     // open the file. With cursor at the end
     std::ifstream file(finalPath, std::ios::ate | std::ios::binary);
 
     if (!file.is_open()) {
-        fmt::println("Failed to open shader file: {}", finalPath);
+        fmt::println(stderr, "Failed to open shader file: {}", finalPath.string());
         return false;
     }
 

@@ -1,7 +1,7 @@
 # CMakeList.txt : CMake project for vulkan_guide, include source and define
 # project specific logic here.
 #
-cmake_minimum_required (VERSION 3.8)
+cmake_minimum_required (VERSION 3.21)
 
 project ("vulkan_guide")
 
@@ -10,6 +10,10 @@ find_package(Vulkan REQUIRED)
 add_subdirectory(third_party)
 
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
+set(DEMO_SCENE_FILE "${PROJECT_SOURCE_DIR}/assets/structure.glb" CACHE FILEPATH
+    "Default scene staged beside demo; packaging sets this to the checksum-verified scene")
+set(DEMO_SCENE_SOURCE_FILE "" CACHE FILEPATH "Checksum-pinned source GLB used for a demo package")
+set(DEMO_SCENE_SHA256 "" CACHE STRING "Checksum of the prepared demo-package scene")
 set (CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
 
 add_subdirectory(shared)
@@ -79,7 +83,36 @@ foreach(SLANG ${SLANG_SOURCE_FILES})
   endif()
 endforeach(SLANG)
 
+# Derive startup checks from the shader outputs rather than duplicating their names.
+set(SHADER_RESOURCE_ENTRIES "")
+foreach(SPIRV_FILE IN LISTS SPIRV_BINARY_FILES)
+    get_filename_component(SPIRV_NAME "${SPIRV_FILE}" NAME)
+    string(APPEND SHADER_RESOURCE_ENTRIES "    \"spirv/${SPIRV_NAME}\",\n")
+endforeach()
+file(CONFIGURE OUTPUT "${PROJECT_BINARY_DIR}/generated/runtime_shader_files.h"
+    CONTENT "#pragma once\ninline constexpr const char* runtimeShaderFiles[] = {\n@SHADER_RESOURCE_ENTRIES@};\n"
+    @ONLY
+)
+target_include_directories(demo PRIVATE "${PROJECT_BINARY_DIR}/generated")
+
 add_custom_target(
     Shaders 
     DEPENDS ${SPIRV_BINARY_FILES}
     )
+
+# Always stage runtime inputs, even when demo itself does not need relinking.
+# CMP0112 (NEW since our minimum version) keeps TARGET_FILE_DIR from adding
+# a dependency back to demo.
+add_custom_target(RuntimeResources
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "$<TARGET_FILE_DIR:demo>/assets" "$<TARGET_FILE_DIR:demo>/spirv"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${DEMO_SCENE_FILE}" "$<TARGET_FILE_DIR:demo>/assets/structure.glb"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${SPIRV_BINARY_FILES} "$<TARGET_FILE_DIR:demo>/spirv"
+    DEPENDS Shaders
+    COMMAND_EXPAND_LISTS
+    VERBATIM
+)
+
+include(cmake/DemoInstall.cmake)

@@ -1,0 +1,16 @@
+Microsoft Visual C++ Runtime
+
+This package includes release runtime redistributable files supplied by the
+installed Visual Studio toolchain's x64 Microsoft.VC*.CRT redistribution
+directory. Debug runtimes are not redistributed.
+
+These Microsoft runtime files are licensed under the applicable Microsoft
+Visual Studio license terms and redistribution conditions, not under this
+project's MIT license. This notice does not replace those terms or grant
+additional redistribution rights.
+
+Microsoft redistribution guidance:
+https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files
+
+Visual Studio redistribution list:
+https://aka.ms/vs/18/redistribution
