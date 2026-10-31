@@ -1,6 +1,6 @@
 # Windows demo distribution plan
 
-Status: steps 1 and 2 implemented; GitHub automation and release publication remain.
+Status: steps 1–3 implemented; hosted PR builds, artifact download/runtime and tagged draft release verified. Default-branch activation awaits merging the CI PR; first public release acceptance remains step 4.
 Last updated: 2026-10-31.
 
 ## Goal and conventions
@@ -79,7 +79,7 @@ The download and prepared scene live in the selected build tree's `demo-assets/`
 
 Validation identifiers included `PRESENT_AFTER_WRITE`, `VUID-vkDestroySemaphore-semaphore-05149`, and `VUID-vkDestroySwapchainKHR-swapchain-01282`. Optimized runtime logs also contained Galaxy overlay layer-naming warnings. No diagnostics were suppressed, and optimized execution was not counted as validation proof.
 
-A clean SDK-free Windows machine was not available; the extracted-package test removed development paths/environment on the existing workstation. PowerShell 5.1 was exercised; PowerShell 7, Visual Studio's multi-config generator, other GPUs/drivers and a clean-machine install remain unverified.
+A clean SDK-free Windows machine was not available; the extracted-package test removed development paths/environment on the existing workstation. Step 2 exercised PowerShell 5.1; subsequent hosted PowerShell 7 packaging evidence is recorded below. Visual Studio's multi-config generator, other GPUs/drivers and a clean-machine install remain unverified.
 
 Local evidence directories under `%TEMP%`:
 - `vk-demo-package-b5befff216084fe180993a9897f00669`: final extracted-package screenshots and runtime logs.
@@ -88,22 +88,41 @@ Local evidence directories under `%TEMP%`:
 
 These are workstation-local evidence, not repository files or durable CI links. Temporary smoke scripts/runtime copies were removed; logs/screenshots were retained.
 
-## Step 3 — GitHub builds and publication: remaining
+## Step 3 — GitHub builds and publication: implemented and PR/tag verified
 
-1. Add `.github/workflows/build-windows.yml` for PRs to `master`, pushes to `master`, and manual dispatch.
-2. Pin the Windows runner image, action revisions, Vulkan SDK/Slang toolchain and vcpkg checkout. Retain the manifest's dependency baseline and cache dependencies with toolchain/manifest-sensitive keys.
-3. Configure a fresh Windows x64 MSVC optimized tree without requiring the untracked local reactor asset. Fail configuration clearly if Slang is missing.
-4. Invoke `scripts/package-demo.ps1`; upload the ZIP, checksum and useful logs with explicit artifact names and retention. Record source identity; never publish a partial package.
-5. Keep PR jobs read-only with respect to release publication. Do not expose release-write credentials to untrusted PR code.
-6. Add `.github/workflows/release-windows.yml` for version tags. Build the tagged commit through the same command and create a **draft** GitHub Release containing the ZIP/checksum, source identity and release notes. Grant write permission only to the publishing job.
-7. Exercise the workflows on GitHub, including a PR build, default-branch artifact download, failure diagnostics and a tagged draft release. Local scripts alone are not proof that CI works.
+- `.github/workflows/build-windows.yml`: build PRs targeting `master`, pushes to `master`, and manual dispatches. Upload the development ZIP/checksum and separate diagnostics with 14-day retention.
+- `.github/workflows/release-windows.yml`: build version tags, then create a draft release in a separate publishing job. Build jobs have `contents: read`; only the publisher gets `contents: write` and artifact-read permission.
+- `.github/actions/package-windows/action.yml`: share toolchain provisioning, vcpkg binary caching, fresh optimized configuration, the existing packaging command, and artifact upload between both workflows. PRs build the merge checkout; tagged builds use the tagged commit. There is no `pull_request_target` execution of PR code.
+- `scripts/ci/windows-toolchain.json` and `prepare-windows.ps1`: checksum-pin Vulkan SDK/Slang 1.4.350.0, CMake 3.31.6 and Ninja 1.13.2; pin vcpkg tooling to release 2026.10.16 while keeping dependency versions governed by the existing manifest baseline. The original 2024 tooling pin tried to download a retired MSYS2 pkgconf package; the maintained tooling fixes acquisition without changing the dependency baseline. Enforce the hosted VS2022 default MSVC 14.44 family and record the full selected compiler version in toolchain evidence/cache keys. `windows-2022` is a selected runner family, not an immutable image; MSVC patch updates are recorded rather than claimed to be bitwise pinned.
+- SDK installation is copy-only under the runner's temporary directory. Downloaded executables/archives are hash-verified before use; no existing local SDK or untracked reactor asset is required.
+- `scripts/ci/publish-demo-release.ps1`: verify package hash, expected archive/root names, clean-source build identity, tag version, configuration, architecture and remote tag target before draft creation. Handle annotated/lightweight tags, refuse an existing release, attach ZIP/checksum, mark prerelease versions appropriately, and never publish automatically.
+- Root CMake configuration now fails early for a missing Slang compiler, including an invalid cached compiler path.
 
-Acceptance: each successful merge produces an identifiable development download; a version tag produces a draft release for a specific commit. No GPU-tested or validation-clean claim is inferred from hosted-runner build success.
+The vcpkg binary cache key includes the manifest/toolchain configuration, selected full MSVC version, SDK version, CMake version and pinned vcpkg revision. GitHub's branch/ref cache isolation keeps PR writes from becoming trusted default-branch caches. Configure, package and toolchain diagnostics are uploaded even when a preceding build step fails; only successful packaging uploads the distributable artifact.
+
+Local checks exercised: actionlint 1.7.12 accepted both workflows; PowerShell parsing passed; `-VerifyOnly` accepted a local metadata fixture and rejected a tampered checksum and mismatched commit without GitHub mutations. A fresh CMake configuration with a nonexistent cached Slang path failed with the expected compiler diagnostic. These checks do not replace a real hosted build or a real release-artifact verification.
+
+### Hosted verification on 2026-10-31
+
+| Scenario | Evidence and result |
+|---|---|
+| Fresh PR build, dependency installation, ZIP/checksum and diagnostic upload | [Run 41245974051](https://github.com/jperez01/vk-playground/actions/runs/41245974051) passed |
+| Subsequent PR build using the saved dependency cache | [Run 41246886768](https://github.com/jperez01/vk-playground/actions/runs/41246886768) passed; primary-key cache hit recorded |
+| Download and execute an actual GitHub-built artifact | Verified SHA256 and clean merge-checkout identity `60ee7a8535b70a8925882bc145efb1a0ea509763`; scene/UI rendered outside the checkout with system-only PATH and SDK environment removed; resize/minimize/restore and normal exit 0 |
+| Annotated version tag and draft-release publisher | [Run 41246883402](https://github.com/jperez01/vk-playground/actions/runs/41246883402) passed both jobs for commit `c4dd0c5d78b1045e3fbf7e99ada74c37cce68c52`; GitHub reported draft=true, prerelease=true and publishedAt=null, with ZIP/checksum attached |
+| Independently download and verify draft assets | Actual downloaded archive passed the publisher's local identity/hash verification; ZIP SHA256 `8ce37c77fe16e12e34bf2ac22be7760816bdc3c2d22ec716a1ef7e305e50ff04` |
+| Failure diagnostics | [Run 41245646703](https://github.com/jperez01/vk-playground/actions/runs/41245646703) failed during the retired-tool download issue and retained downloadable logs; later runs passed after the tooling fix |
+
+The temporary verification drafts/tags were removed after inspection; no public release was published. Hosted provisioning recorded MSVC toolset `14.44.35207` / compiler `19.44.35229.0`, Vulkan SDK `1.4.350.0` / Slang `2026.8`, CMake `3.31.6` and Ninja `1.13.2`. Packaging and scene preparation ran under PowerShell 7; the draft publisher also ran successfully under the workflow's Windows PowerShell shell.
+
+Actual artifact runtime screenshots/logs are retained locally under `%TEMP%/vk-github-artifact-d2f58dd0c79a4def8f4dad8e45fc662a`. Runtime logs contained the existing Galaxy overlay naming warnings. This optimized check did not run Vulkan validation, camera/model-import interactions, or a clean-machine install. The existing Debug validation failures above remain unresolved.
+
+Default-branch push and manual-dispatch checks require the workflows to be merged into `master`; this change does not merge its own PR. Review and merge [PR #19](https://github.com/jperez01/vk-playground/pull/19), then inspect the resulting `master` build and manual-dispatch availability. These are explicit post-merge activation checks, not already exercised results. No GPU-tested or validation-clean claim follows from hosted-runner success alone.
 
 ## Step 4 — release acceptance and first publication: remaining
 
 1. Extend the existing renderer smoke harness with an explicit extracted-package/executable mode so package checks reuse its capture and lifecycle logic instead of retaining ad-hoc scripts.
-2. Exercise the GitHub-built archive on a GPU-equipped Windows desktop: launch outside the checkout with an unrelated working directory, inspect scene/UI, exercise camera and File -> Load, resize/minimize/restore, and close normally. Retain logs and screenshots.
+2. Exercise the chosen release candidate on a GPU-equipped Windows desktop, including camera and File -> Load, and retain logs/screenshots. Basic GitHub-artifact rendering and window lifecycle were already exercised above; repeat acceptance for the exact candidate intended for publication.
 3. Verify required DLLs on a clean Windows 10/11 x64 machine without development tools/SDK, with a supported GPU driver.
 4. Run matching Debug Vulkan-validation checks separately. Report build, runtime/visual, and validation outcomes independently.
 5. Add README download links and a release checklist, including hardware requirements, known issues and evidence for the exact release candidate. Publish the draft only after reviewing that candidate.

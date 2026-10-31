@@ -1,0 +1,98 @@
+name: Package Windows demo
+description: Provision the pinned toolchain and build the existing Demo ZIP package.
+inputs:
+  version:
+    description: Optional package version; empty uses the checked-out commit.
+    required: false
+    default: ''
+outputs:
+  commit:
+    description: Exact checked-out source commit.
+    value: ${{ steps.identity.outputs.commit }}
+  artifact-name:
+    description: Name of the uploaded ZIP and checksum artifact.
+    value: windows-x64-${{ steps.identity.outputs.commit }}
+runs:
+  using: composite
+  steps:
+    - name: Record source identity
+      id: identity
+      shell: pwsh
+      env:
+        PACKAGE_VERSION: ${{ inputs.version }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $commit = (git rev-parse HEAD).Trim()
+        if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[0-9a-f]{40}$') { throw 'Cannot identify checkout.' }
+        $identifier = '(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+        $tagPattern = '\Av(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-' + $identifier + '(?:\.' + $identifier + ')*)?\z'
+        if ($env:PACKAGE_VERSION -and $env:PACKAGE_VERSION -cnotmatch $tagPattern) { throw 'Release tags must be vMAJOR.MINOR.PATCH with an optional SemVer prerelease suffix.' }
+        "commit=$commit" >> $env:GITHUB_OUTPUT
+        New-Item -ItemType Directory -Path out/ci-logs -Force | Out-Null
+    - name: Prepare pinned Windows toolchain
+      id: tools
+      shell: pwsh
+      run: |
+        Start-Transcript -Path out/ci-logs/toolchain.log
+        try { ./scripts/ci/prepare-windows.ps1 -ToolsDirectory (Join-Path $env:RUNNER_TEMP 'vk-demo-tools') }
+        finally { Stop-Transcript }
+
+    - name: Prepare vcpkg binary cache
+      shell: pwsh
+      run: |
+        $cache = Join-Path $env:RUNNER_TEMP 'vk-demo-vcpkg-binaries'
+        New-Item -ItemType Directory -Path $cache -Force | Out-Null
+        "VCPKG_DEFAULT_BINARY_CACHE=$cache" >> $env:GITHUB_ENV
+
+    - name: Cache compiled vcpkg dependencies
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/vk-demo-vcpkg-binaries
+        key: vcpkg-${{ runner.os }}-x64-msvc-${{ steps.tools.outputs.msvc-version }}-sdk-${{ steps.tools.outputs.sdk-version }}-cmake-${{ steps.tools.outputs.cmake-version }}-${{ steps.tools.outputs.vcpkg-ref }}-${{ hashFiles('vcpkg.json', 'scripts/ci/windows-toolchain.json') }}
+
+    - name: Configure optimized x64 build
+      shell: cmd
+      run: |
+        call "%CI_VCVARSALL%" x64 > out\ci-logs\vcvars.log 2>&1
+        if errorlevel 1 (type out\ci-logs\vcvars.log & exit /b 1)
+        "%CI_CMAKE%" -S . -B out/ci-build -G Ninja "-DCMAKE_MAKE_PROGRAM=%CI_NINJA%" -DCMAKE_BUILD_TYPE=RelWithDebInfo "-DCMAKE_TOOLCHAIN_FILE=%CI_VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows > out\ci-logs\configure.log 2>&1
+        set CONFIGURE_EXIT=%errorlevel%
+        type out\ci-logs\configure.log
+        if not exist out\ci-build\CMakeCache.txt exit /b 1
+        exit /b %CONFIGURE_EXIT%
+
+    - name: Build and package demo
+      shell: pwsh
+      env:
+        PACKAGE_VERSION: ${{ inputs.version }}
+      run: |
+        $arguments = @{ BuildDirectory = 'out/ci-build'; Configuration = 'RelWithDebInfo'; OutputDirectory = 'out/ci-packages' }
+        if ($env:PACKAGE_VERSION) { $arguments.Version = $env:PACKAGE_VERSION }
+        ./scripts/package-demo.ps1 @arguments
+
+    - name: Upload demo ZIP and checksum
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: windows-x64-${{ steps.identity.outputs.commit }}
+        path: |
+          out/ci-packages/*.zip
+          out/ci-packages/*.zip.sha256
+        if-no-files-found: error
+        retention-days: 14
+
+    - name: Upload toolchain and build diagnostics
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: windows-x64-logs-${{ github.run_id }}-${{ github.run_attempt }}
+        path: |
+          out/ci-logs/
+          out/ci-packages/.work-*/build.*.log
+          ${{ runner.temp }}/vk-demo-tools/toolchain-evidence.json
+          ${{ runner.temp }}/vk-demo-tools/*.log
+          out/ci-build/CMakeFiles/CMakeConfigureLog.yaml
+          out/ci-build/vcpkg-manifest-install.log
+          ${{ runner.temp }}/vk-demo-tools/vcpkg-*/buildtrees/**/*.log
+        include-hidden-files: true
+        if-no-files-found: warn
+        retention-days: 14
