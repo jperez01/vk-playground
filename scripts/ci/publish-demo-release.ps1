@@ -104,7 +104,7 @@ try {
         return
     }
 
-    $script:gh = (Get-Command gh -CommandType Application).Source
+    $script:gh = (Get-Command gh -CommandType Application | Select-Object -First 1).Source
     $escapedTag = [Uri]::EscapeDataString($Tag)
     $reference = Invoke-GitHubApi "repos/$Repository/git/ref/tags/$escapedTag"
     if ($reference.ref -cne ('refs/tags/' + $Tag)) { throw 'GitHub returned a different tag reference.' }

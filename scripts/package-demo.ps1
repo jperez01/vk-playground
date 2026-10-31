@@ -64,7 +64,7 @@ try {
         $VcVarsAll = $compiler.Substring(0, $index) + '/VC/Auxiliary/Build/vcvarsall.bat'
     }
     if (-not (Test-Path -LiteralPath $VcVarsAll -PathType Leaf)) { throw "Missing MSVC environment: $VcVarsAll" }
-    $cmake = (Get-Command cmake -CommandType Application).Source
+    $cmake = (Get-Command cmake -CommandType Application | Select-Object -First 1).Source
     $commit = (& git -C $root rev-parse HEAD | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[0-9a-f]{40}$') { throw 'Cannot identify the Git source revision.' }
     $dirty = [bool](& git -C $root status --porcelain --untracked-files=normal)

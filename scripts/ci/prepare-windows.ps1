@@ -134,7 +134,7 @@ foreach ($relative in @('Bin/slangc.exe', 'Include/vulkan/vulkan.h', 'Lib/vulkan
 $slangActual = Invoke-Checked $slang @('-version')
 if (-not $slangActual) { throw 'Slang compiler did not report a version.' }
 
-$git = (Get-Command git -CommandType Application -ErrorAction Stop).Source
+$git = (Get-Command git -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $vcpkgRoot = Join-Path $tools ('vcpkg-' + $config.vcpkg.ref)
 if (-not (Test-Path -LiteralPath $vcpkgRoot)) {
     $null = Invoke-Checked $git @('clone', '--no-checkout', $config.vcpkg.url, $vcpkgRoot)
