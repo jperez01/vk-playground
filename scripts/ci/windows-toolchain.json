@@ -25,6 +25,7 @@
   },
   "vcpkg": {
     "url": "https://github.com/microsoft/vcpkg.git",
-    "ref": "c82f74667287d3dc386bce81e44964370c91a289"
+    "ref": "9eec002df1cd109f8f104cd966a763daf9751489",
+    "release": "2026.10.16"
   }
 }

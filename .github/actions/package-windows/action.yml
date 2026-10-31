@@ -53,7 +53,7 @@ runs:
       run: |
         call "%CI_VCVARSALL%" x64 > out\ci-logs\vcvars.log 2>&1
         if errorlevel 1 (type out\ci-logs\vcvars.log & exit /b 1)
-        cmake -S . -B out/ci-build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo "-DCMAKE_TOOLCHAIN_FILE=%CI_VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows > out\ci-logs\configure.log 2>&1
+        "%CI_CMAKE%" -S . -B out/ci-build -G Ninja "-DCMAKE_MAKE_PROGRAM=%CI_NINJA%" -DCMAKE_BUILD_TYPE=RelWithDebInfo "-DCMAKE_TOOLCHAIN_FILE=%CI_VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows > out\ci-logs\configure.log 2>&1
         set CONFIGURE_EXIT=%errorlevel%
         type out\ci-logs\configure.log
         if not exist out\ci-build\CMakeCache.txt exit /b 1
@@ -89,6 +89,8 @@ runs:
           ${{ runner.temp }}/vk-demo-tools/toolchain-evidence.json
           ${{ runner.temp }}/vk-demo-tools/*.log
           out/ci-build/CMakeFiles/CMakeConfigureLog.yaml
+          out/ci-build/vcpkg-manifest-install.log
+          ${{ runner.temp }}/vk-demo-tools/vcpkg-*/buildtrees/**/*.log
         include-hidden-files: true
         if-no-files-found: warn
         retention-days: 14

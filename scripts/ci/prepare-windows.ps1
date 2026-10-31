@@ -141,7 +141,7 @@ if (-not (Test-Path -LiteralPath $vcpkgRoot)) {
     $null = Invoke-Checked $git @('-C', $vcpkgRoot, 'checkout', '--detach', $config.vcpkg.ref)
 }
 $vcpkgHead = Invoke-Checked $git @('-C', $vcpkgRoot, 'rev-parse', 'HEAD')
-if ($vcpkgHead -ne $config.vcpkg.ref) { throw 'vcpkg checkout HEAD does not match the pinned baseline.' }
+if ($vcpkgHead -ne $config.vcpkg.ref) { throw 'vcpkg checkout HEAD does not match the pinned tooling revision.' }
 $vcpkgOrigin = Invoke-Checked $git @('-C', $vcpkgRoot, 'remote', 'get-url', 'origin')
 if ($vcpkgOrigin -ne $config.vcpkg.url) { throw 'vcpkg checkout has an unexpected origin.' }
 $vcpkgDirty = Invoke-Checked $git @('-C', $vcpkgRoot, 'status', '--porcelain', '--untracked-files=no')
@@ -172,7 +172,8 @@ $evidence = [ordered]@{
     vcpkg = [ordered]@{ pin = $config.vcpkg; root = $vcpkgRoot; actual_head = $vcpkgHead; actual_version = $vcpkgActual }
 }
 $evidence | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $tools 'toolchain-evidence.json') -Encoding utf8
-Write-GitHubLines $env:GITHUB_ENV @("VULKAN_SDK=$sdk", "CI_VCPKG_ROOT=$vcpkgRoot", "CI_VCVARSALL=$vcvars")
+Write-GitHubLines $env:GITHUB_ENV @("VULKAN_SDK=$sdk", "CI_VCPKG_ROOT=$vcpkgRoot", "CI_VCVARSALL=$vcvars",
+    "CI_CMAKE=$cmake", "CI_NINJA=$ninja")
 Write-GitHubLines $env:GITHUB_PATH @($cmakeBin, $ninjaBin, $sdkBin)
 Write-GitHubLines $env:GITHUB_OUTPUT @("msvc-version=$msvcVersion", "sdk-version=$($config.vulkan_sdk.version)",
     "vcpkg-ref=$vcpkgHead", "cmake-version=$($config.cmake.version)")
