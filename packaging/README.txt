@@ -11,6 +11,9 @@ Windows 10/11 x64 with an up-to-date GPU driver providing Vulkan 1.3,
 VK_KHR_push_descriptor, dynamic rendering, synchronization2, buffer device
 addresses, runtime descriptor arrays, partially bound sampled-image descriptors,
 sampled-image update-after-bind, timeline semaphores and shader draw parameters.
+VK_EXT_swapchain_maintenance1 with swapchainMaintenance1 is required for safe
+presentation retirement, together with VK_EXT_surface_maintenance1 and
+VK_KHR_get_surface_capabilities2 instance extensions.
 Vulkan 1.3 support alone does not guarantee all required device features.
 The Windows Vulkan loader and vendor driver are system prerequisites; this
 archive does not replace them. Microsoft release C++ runtime DLLs are included
@@ -33,9 +36,10 @@ See the accompanying .zip.sha256 file to verify the downloaded archive.
 
 KNOWN LIMITATIONS
 An optimized build does not run Vulkan validation and is not proof of correctness.
-Existing Debug validation checks report PRESENT_AFTER_WRITE presentation hazards,
-VUID-vkDestroySemaphore-semaphore-05149 and
-VUID-vkDestroySwapchainKHR-swapchain-01282 during swapchain cleanup.
+Local Debug checks on 2026-10-31 (RTX 5070 Ti) reported zero validation errors
+after synchronization/presentation-retirement fixes, including resize, present-mode
+changes, model import/replacement and normal shutdown. External layer-name and
+small-allocation performance warnings remain. Other GPUs/drivers are unverified.
 Build/package success does not mean the archive was GPU-tested.
 
 LICENSES
