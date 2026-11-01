@@ -47,6 +47,7 @@ GPUMeshBuffers UploadBatch::uploadMesh(std::span<uint32_t> indices, std::span<Ve
     memcpy(data, vertices.data(), vertexBufferSize);
     // copy index buffer
     memcpy((char*)data + vertexBufferSize, indices.data(), indexBufferSize);
+    VK_CHECK(vmaFlushAllocation(context.allocator, staging.allocation, 0, VK_WHOLE_SIZE));
 
     VkBufferCopy vertexCopy { 0 };
     vertexCopy.dstOffset = 0;
@@ -62,6 +63,19 @@ GPUMeshBuffers UploadBatch::uploadMesh(std::span<uint32_t> indices, std::span<Ve
 
     vkCmdCopyBuffer(cmd, staging.buffer, newSurface.indexBuffer.buffer, 1, &indexCopy);
 
+    // The fence retires staging memory on the host; device consumers still need
+    // transfer writes made visible to index fetch and vertex pulling.
+    VkMemoryBarrier2 meshBarrier{ .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
+    meshBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+    meshBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    meshBarrier.dstStageMask = VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+    meshBarrier.dstAccessMask = VK_ACCESS_2_INDEX_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
+
+    VkDependencyInfo dependency{ .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+    dependency.memoryBarrierCount = 1;
+    dependency.pMemoryBarriers = &meshBarrier;
+    vkCmdPipelineBarrier2(cmd, &dependency);
+
     stagingBuffers.push_back(std::move(staging));
 
     return newSurface;
@@ -73,6 +87,7 @@ AllocatedImage UploadBatch::uploadImage(void* data, VkExtent3D size, VkFormat fo
     AllocatedBuffer uploadbuffer = vkutil::createBuffer(context.allocator, data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, vkutil::HOST_WRITE_MAPPED);
 
     memcpy(uploadbuffer.info.pMappedData, data, data_size);
+    VK_CHECK(vmaFlushAllocation(context.allocator, uploadbuffer.allocation, 0, VK_WHOLE_SIZE));
 
     AllocatedImage new_image = vkutil::createImage(context.device, context.allocator, size, format, usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, mipmapped);
 

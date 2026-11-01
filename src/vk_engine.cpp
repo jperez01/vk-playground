@@ -271,6 +271,18 @@ bool VulkanEngine::beginFrame(uint32_t& swapchainImageIndex)
 		resizeRequested = true;
 		return false;
 	}
+	if (e == VK_SUBOPTIMAL_KHR) {
+		resizeRequested = true;
+	} else {
+		VK_CHECK(e);
+	}
+
+	// Reuse a presentation fence only after its previous request has retired.
+	if (swapchainPresentPending[swapchainImageIndex]) {
+		VK_CHECK(vkWaitForFences(device, 1, &swapchainPresentFences[swapchainImageIndex], VK_TRUE, UINT64_MAX));
+		VK_CHECK(vkResetFences(device, 1, &swapchainPresentFences[swapchainImageIndex]));
+		swapchainPresentPending[swapchainImageIndex] = false;
+	}
 
 	drawExtent.height = std::min(swapchainExtent.height, drawImage.imageExtent.height) * renderScale;
 	drawExtent.width = std::min(swapchainExtent.width, drawImage.imageExtent.width) * renderScale;
@@ -299,9 +311,10 @@ void VulkanEngine::recordBackgroundPass(VkCommandBuffer cmd)
 
 	gpuProfiler.begin(cmd, slot, GpuPass::Background);
 
-	// transition our main draw image into general layout so we can write into it
-	// we will overwrite it all so we dont care about what was the older layout
-	vkutil::transitionImageForComputeWrite(cmd, drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+	// Discard contents, but order the previous frame's tonemap reads before reuse.
+	vkutil::transitionImage(cmd, drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+		VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
+		VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT);
 
 	// bind the background compute pipeline
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, effect.pipeline);
@@ -326,8 +339,8 @@ void VulkanEngine::recordGeometryPass(VkCommandBuffer cmd)
 		depthImage.image,
 		VK_IMAGE_LAYOUT_UNDEFINED,
 		VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-		VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-		0,
+		VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+		VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
 		VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
 		VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
 		VK_IMAGE_ASPECT_DEPTH_BIT);
@@ -365,7 +378,7 @@ void VulkanEngine::recordTonemapPass(VkCommandBuffer cmd)
 		VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
 
 	vkutil::transitionImage(cmd, postProcessingImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-		VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
+		VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
 		VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT);
 
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, postProcessPipeline);
@@ -476,10 +489,10 @@ void VulkanEngine::submitAndPresent(VkCommandBuffer cmd, uint32_t swapchainImage
 	timelineValue++;
 	getCurrentFrame().frameTimelineValue = timelineValue;
 
-	VkSemaphoreSubmitInfo waitInfo = vkinit::semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR, getCurrentFrame().swapchainSemaphore);
+	VkSemaphoreSubmitInfo waitInfo = vkinit::semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, getCurrentFrame().swapchainSemaphore);
 
 	VkSemaphoreSubmitInfo signalInfos[2];
-	signalInfos[0] = vkinit::semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, swapchainRenderSemaphores[swapchainImageIndex]);
+	signalInfos[0] = vkinit::semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, swapchainRenderSemaphores[swapchainImageIndex]);
 	signalInfos[1] = vkinit::semaphoreSubmitInfo(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, timelineSemaphore);
 	signalInfos[1].value = timelineValue;
 
@@ -500,12 +513,21 @@ void VulkanEngine::submitAndPresent(VkCommandBuffer cmd, uint32_t swapchainImage
 
 	presentInfo.pImageIndices = &swapchainImageIndex;
 
+	VkSwapchainPresentFenceInfoEXT presentFenceInfo{};
+	presentFenceInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_EXT;
+	presentFenceInfo.swapchainCount = 1;
+	presentFenceInfo.pFences = &swapchainPresentFences[swapchainImageIndex];
+	presentInfo.pNext = &presentFenceInfo;
+
 	VkResult presentResult = vkQueuePresentKHR(graphicsQueue, &presentInfo);
-	if (presentResult == VK_ERROR_OUT_OF_DATE_KHR) {
+	if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR) {
 		resizeRequested = true;
-		return;
+	} else {
+		VK_CHECK(presentResult);
 	}
-	//increase the number of frames drawn
+	// OUT_OF_DATE still enqueues the present wait and its retirement fence.
+	swapchainPresentPending[swapchainImageIndex] = true;
+	// Every submitted frame advances the slot, including an out-of-date present.
 	frameNumber++;
 }
 
@@ -599,6 +621,7 @@ void VulkanEngine::drawGeometry(VkCommandBuffer cmd)
     //write the buffer
     GPUSceneData* sceneUniformData = (GPUSceneData*)getCurrentFrame().sceneDataBuffer.allocation->GetMappedData();
     *sceneUniformData = sceneData;
+    VK_CHECK(vmaFlushAllocation(allocator, getCurrentFrame().sceneDataBuffer.allocation, 0, sizeof(GPUSceneData)));
 
 
     MaterialPipeline* lastPipeline = nullptr;
@@ -738,7 +761,9 @@ void VulkanEngine::initVulkan()
     auto inst_ret = builder.set_app_name("Example Vulkan Application")
                         .request_validation_layers(bUseValidationLayers)
                         .use_default_debug_messenger()
-                        .require_api_version(1, 3, 0);
+                        .require_api_version(1, 3, 0)
+                        .enable_extension(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME)
+                        .enable_extension(VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
     
     // Enable enhanced validation features when validation layers are active
     // Best practices validation warns about non-optimal Vulkan usage patterns
@@ -777,6 +802,10 @@ void VulkanEngine::initVulkan()
    features11.shaderDrawParameters = true;
    features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
 
+    VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT maintenanceFeatures{};
+    maintenanceFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT;
+    maintenanceFeatures.swapchainMaintenance1 = VK_TRUE;
+
     // use vkbootstrap to select a gpu.
     // We want a gpu that can write to the SDL surface and supports vulkan 1.2
     vkb::PhysicalDeviceSelector selector { vkb_inst };
@@ -786,6 +815,8 @@ void VulkanEngine::initVulkan()
         .set_required_features_11(features11)
         .set_surface(surface)
         .add_required_extension(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME)
+        .add_required_extension(VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME)
+        .add_required_extension_features(maintenanceFeatures)
         .select()
         .value();
 
@@ -875,13 +906,27 @@ void VulkanEngine::createSwapchain(uint32_t width, uint32_t height)
 
 	swapchainImageFormat = VK_FORMAT_B8G8R8A8_UNORM;
 
+	uint32_t modeCount = 0;
+	VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(chosenGPU, surface, &modeCount, nullptr));
+	std::vector<VkPresentModeKHR> supportedModes(modeCount);
+	VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(chosenGPU, surface, &modeCount, supportedModes.data()));
+	supportedModes.resize(modeCount);
+	if (std::find(supportedModes.begin(), supportedModes.end(), presentMode) == supportedModes.end()) {
+		presentMode = VK_PRESENT_MODE_FIFO_KHR;
+	}
+	// Mode changes recreate the swapchain, so only this creation's mode is needed.
+	VkSwapchainPresentModesCreateInfoEXT modesInfo{};
+	modesInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODES_CREATE_INFO_EXT;
+	modesInfo.presentModeCount = 1;
+	modesInfo.pPresentModes = &presentMode;
+
 	vkb::Swapchain vkbSwapchain = swapchainBuilder
 		//.use_default_format_selection()
 		.set_desired_format(VkSurfaceFormatKHR{ .format = swapchainImageFormat, .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR })
-		//falls back to FIFO (vsync) if the desired mode is unsupported
 		.set_desired_present_mode(presentMode)
 		.set_desired_extent(width, height)
 		.add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+		.add_pNext(&modesInfo)
 		.build()
 		.value();
 
@@ -894,12 +939,26 @@ void VulkanEngine::createSwapchain(uint32_t width, uint32_t height)
 
 	VkSemaphoreCreateInfo semaphoreCreateInfo = vkinit::semaphoreCreateInfo();
 	swapchainRenderSemaphores.resize(swapchainImages.size());
+	swapchainPresentFences.resize(swapchainImages.size());
+	swapchainPresentPending.assign(swapchainImages.size(), false);
+	VkFenceCreateInfo fenceCreateInfo{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
 	for (size_t i = 0; i < swapchainRenderSemaphores.size(); i++) {
 		VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &swapchainRenderSemaphores[i]));
+		VK_CHECK(vkCreateFence(device, &fenceCreateInfo, nullptr, &swapchainPresentFences[i]));
 	}
 }
 void VulkanEngine::destroySwapchain()
 {
+	// Graphics completion alone does not retire presentation's semaphore/image use.
+	// Callers first wait for rendering; these fences cover every past present.
+	for (size_t i = 0; i < swapchainPresentFences.size(); i++) {
+		if (swapchainPresentPending[i]) {
+			VK_CHECK(vkWaitForFences(device, 1, &swapchainPresentFences[i], VK_TRUE, UINT64_MAX));
+		}
+		vkDestroyFence(device, swapchainPresentFences[i], nullptr);
+	}
+	swapchainPresentFences.clear();
+	swapchainPresentPending.clear();
 	for (size_t i = 0; i < swapchainRenderSemaphores.size(); i++) {
 		if (swapchainRenderSemaphores[i] != VK_NULL_HANDLE) {
 			vkDestroySemaphore(device, swapchainRenderSemaphores[i], nullptr);
@@ -908,12 +967,14 @@ void VulkanEngine::destroySwapchain()
 	swapchainRenderSemaphores.clear();
 	swapchainImageInitialized.clear();
 
-	vkDestroySwapchainKHR(device, swapchain, nullptr);
-
 	// destroy swapchain resources
 	for (int i = 0; i < swapchainImageViews.size(); i++) {
 		vkDestroyImageView(device, swapchainImageViews[i], nullptr);
 	}
+	swapchainImageViews.clear();
+	swapchainImages.clear();
+	vkDestroySwapchainKHR(device, swapchain, nullptr);
+	swapchain = VK_NULL_HANDLE;
 }
 
 void VulkanEngine::resizeSwapchain()
@@ -1365,6 +1426,17 @@ int VulkanEngine::addGlobalTexture(VkImageView view, VkSampler sampler)
     vkUpdateDescriptorSets(device, FRAME_OVERLAP, writes, 0, nullptr);
     globalTextureSlots[{ view, sampler }] = index;
     return index;
+}
+
+void VulkanEngine::forgetGlobalTexture(VkImageView view)
+{
+    // Leave descriptor slots untouched: submitted draws may still reference them.
+    std::erase_if(globalTextureSlots, [view](const auto& entry) { return entry.first.first == view; });
+}
+
+void VulkanEngine::forgetGlobalSampler(VkSampler sampler)
+{
+    std::erase_if(globalTextureSlots, [sampler](const auto& entry) { return entry.first.second == sampler; });
 }
 
 

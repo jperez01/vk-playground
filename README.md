@@ -35,6 +35,7 @@ Requirements:
 - Windows with Visual Studio 2022 or newer. CLion with the MSVC toolchain also works.
 - CMake 3.21 or newer.
 - [Vulkan SDK](https://vulkan.lunarg.com/) 1.3 or newer. It includes `slangc`, which compiles the shaders and must be on your `PATH`.
+- Presentation retirement requires `VK_EXT_swapchain_maintenance1` with `swapchainMaintenance1`, plus the instance extensions `VK_EXT_surface_maintenance1` and `VK_KHR_get_surface_capabilities2`. Vulkan 1.3 alone does not guarantee these; use SDK headers that include them.
 - [vcpkg](https://github.com/microsoft/vcpkg) with `CMAKE_TOOLCHAIN_FILE` pointing at its `scripts/buildsystems/vcpkg.cmake`. The dependencies are listed in `vcpkg.json`.
 
 ```sh
@@ -81,9 +82,9 @@ If `-Version` is omitted, the label includes the Git commit and a `-dirty` suffi
 
 Do not run IDE builds concurrently. Packaging shares the smoke harness mutex and refuses existing `demo.exe` processes, but cannot lock external IDE builds. Dependency projects have their own SDK install rules: use the wrapper's `--component Demo` installation, not an unrestricted install or a ZIP of `bin/`.
 
-Recipients extract the entire archive and run `demo.exe`. They need a compatible Vulkan 1.3 GPU/driver with the required descriptor, device-address, timeline and push-descriptor features (detailed in the packaged README); they do not need build tools or the Vulkan SDK. The system Vulkan loader/driver is not bundled. This executable is unsigned; Windows may display reputation warnings.
+Recipients extract the entire archive and run `demo.exe`. They need a compatible Vulkan 1.3 GPU/driver with the required descriptor, device-address, timeline, push-descriptor and swapchain-maintenance features (detailed in the packaged README); they do not need build tools or the Vulkan SDK. The system Vulkan loader/driver is not bundled. This executable is unsigned; Windows may display reputation warnings.
 
-Before sharing, smoke-check the **extracted archive** outside the checkout, inspect actual rendering, resize/minimize/restore, and close normally. Use Debug with validation separately; an optimized ZIP passing compilation or launch does not prove Vulkan correctness. Existing presentation/cleanup validation failures remain documented below.
+Before sharing, smoke-check the **extracted archive** outside the checkout, inspect actual rendering, resize/minimize/restore, and close normally. Use Debug with validation separately; an optimized ZIP passing compilation or launch does not prove Vulkan correctness.
 
 See [the demo distribution plan](docs/DEMO_DISTRIBUTION_PLAN.md) for completed changes, verification evidence, remaining GitHub Actions/release work, and acceptance criteria.
 
@@ -138,7 +139,7 @@ The printed evidence directory contains `report.json`, stdout/stderr logs, and f
 
 Exit codes: **0** automated checks passed, **1** prerequisite/build failure, **2** runtime/capture/cleanup failure, **3** validation errors despite successful runtime checks. Runtime/build failures take precedence over validation failure. Warnings remain in the report/logs; repeated validation output may be capped by the layer. `-Profile RelWithDebInfo` is an additional optimized check and never reports validation as passed.
 
-The Debug smoke check currently exposes presentation synchronization and in-use swapchain/semaphore destruction errors. A successful launch/exit is not a validation pass; the harness does not suppress those diagnostics.
+The 2026-10-31 Debug checks on an RTX 5070 Ti reported zero validation errors after the synchronization and presentation-retirement fixes. Resize/minimize/restore, present-mode changes, background switching, model import/replacement and normal shutdown were exercised. External layer-name and small-allocation performance warnings remain; this is not a guarantee for untested GPUs or release artifacts. See [validation evidence and coverage](docs/VALIDATION_HANDOFF.md).
 
 ## Controls
 
