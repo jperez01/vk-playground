@@ -5,6 +5,7 @@ class Camera {
 public:
     glm::vec3 velocity;
     glm::vec3 position;
+    float movementSpeed { 2.f }; // World units per second; adjusted in the Camera menu.
     // vertical rotation
     float pitch { 0.f };
     // horizontal rotation
@@ -15,5 +16,5 @@ public:
 
     void processSDLEvent(SDL_Event& e);
 
-    void update();
+    void update(float deltaSeconds);
 };

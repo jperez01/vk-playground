@@ -12,7 +12,8 @@
 
 namespace Editor
 {
-    void handleUi(VulkanEngine* engine);
+    void handleUi(VulkanEngine* engine, Camera& camera);
+    bool capturesPointer();
     void setupTheme();
 }
 

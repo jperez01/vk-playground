@@ -7,6 +7,8 @@ add_executable (demo
   gpu_profiler.cpp
   gpu_profiler.h
   upload_batch.h
+  editor_guides.h
+  editor_guides.cpp
   upload_batch.cpp
 
   vk_loader.h
@@ -19,6 +21,10 @@ add_executable (demo
         app/application.h
         app/ui.cpp
         app/ui.h
+        app/transform_gizmo.cpp
+        app/transform_gizmo.h
+        app/orientation_widget.cpp
+        app/orientation_widget.h
 )
 
 find_package(assimp CONFIG REQUIRED)
@@ -29,7 +35,7 @@ set_property(TARGET demo PROPERTY VS_DEBUGGER_WORKING_DIRECTORY $<TARGET_FILE_DI
 
 target_include_directories(demo PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 
-target_link_libraries(demo vkguide_shared vkbootstrap imgui fastgltf::fastgltf assimp::assimp nfd::nfd)
+target_link_libraries(demo vkguide_shared vkbootstrap imgui imguizmo imviewguizmo fastgltf::fastgltf assimp::assimp nfd::nfd)
 add_dependencies(demo RuntimeResources)
 
 add_custom_command(TARGET demo POST_BUILD

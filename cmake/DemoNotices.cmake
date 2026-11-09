@@ -49,6 +49,8 @@ _demo_notice_copy("${PROJECT_SOURCE_DIR}/third_party/SDL/src/video/yuv2rgb/LICEN
 _demo_notice_copy("${PROJECT_SOURCE_DIR}/third_party/SDL/src/hidapi/LICENSE-bsd.txt" "SDL2-hidapi.txt")
 _demo_notice_copy("${PROJECT_SOURCE_DIR}/third_party/fmt/LICENSE.rst" "fmt.txt")
 _demo_notice_copy("${PROJECT_SOURCE_DIR}/third_party/fastgltf/LICENSE.md" "fastgltf.txt")
+_demo_notice_copy("${PROJECT_SOURCE_DIR}/third_party/ImGuizmo/LICENSE" "ImGuizmo.txt")
+_demo_notice_copy("${PROJECT_SOURCE_DIR}/third_party/ImViewGuizmo/LICENSE" "ImViewGuizmo.txt")
 _demo_notice_extract("${PROJECT_SOURCE_DIR}/third_party/SDL/src/libm/e_atan2.c"
     "SDL2-SunPro.txt" "/*" "*/")
 

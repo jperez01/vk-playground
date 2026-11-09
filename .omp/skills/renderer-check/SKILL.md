@@ -12,7 +12,7 @@ Run commands from the repository root unless a working directory is specified. R
 - Use **Debug** for correctness: `src/vk_engine.cpp` enables validation without `NDEBUG`, including best-practices and synchronization validation.
 - Use **RelWithDebInfo** only for additional optimized/performance checks. It does not prove validation cleanliness.
 - Before a renderer bug fix, capture the failing scenario if not already supplied by the user; repeat the same scenario after the fix. Never rerun a user-reported failure just to confirm it.
-- Check `assets/structure.glb`, the selected CMake cache, Vulkan SDK, and build tools. Do not fabricate assets, change toolchains, or disable validation to bypass missing prerequisites.
+- Check the selected CMake cache, Vulkan SDK, build tools, and bundled font. Startup is empty and needs no model assets; use a real local model for import/occlusion checks. Do not fabricate assets, change toolchains, or disable validation to bypass missing prerequisites.
 
 ## 2. Build and automate the lifecycle check
 
@@ -54,9 +54,9 @@ demo.exe
 
 Capture **both stdout and stderr** to fresh temporary logs or an IDE console, continuously through exit. Validation messages can appear on stdout, and repeated diagnostics can hit the layer's duplicate-message limit. Do not rely on the old `bin/output.log` or on process exit status alone. Use CLion MCP only if available and its selected build profile is confirmed; otherwise launch the executable directly.
 
-- Confirm the `Vulkan Engine` window renders the default structure scene and ImGui **Stats** / **background** panels. Inspect a screenshot or the actual surface; a live process is insufficient.
+- Confirm the `Vulkan Engine` window starts with an empty scene hierarchy, one-unit XZ grid, colored XYZ axes, and ImGui **Scene** / **Files / Inspector** panes. **Stats** / **background** remain available as tabs. Inspect a screenshot or the actual surface; a live process is insufficient.
 - Let several frames render. Resize the window, minimize, and restore it; confirm the scene and UI resume rendering. The harness automates these window operations, but its report cannot judge the captured images.
-- Exercise the changed path, not just startup. Examples: camera movement (`W/A/S/D`, mouse), **File → Load** for import changes, background effect controls for compute changes, or present-mode selection for swapchain changes. Only claim interactions actually performed.
+- Exercise the changed path, not just startup. Examples: camera movement (`W/A/S/D`, right mouse drag), **View → Grid / Axes**, **File → Load**, selected-node **Gizmo** translation/rotation/scaling, corner navigator axis clicks/orbit, background effect controls, or present-mode selection. For gizmo changes, inspect actual object motion, hierarchy transform behavior, clipping/input ownership, and selection replacement—not just visible handles. Only claim interactions actually performed.
 - Close the window normally so `Application::cleanup()` runs. Record the exit code and diagnostics through shutdown. Termination/timeout is not a successful cleanup check. Stop only the instance started for this check; leave pre-existing user instances alone.
 - If desktop interaction is unavailable, report that limitation and the exact unexercised scenarios. Do not replace visual proof with source inspection or a bare process-alive check.
 

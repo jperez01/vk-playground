@@ -45,8 +45,11 @@ void Camera::processSDLEvent(SDL_Event& e)
     }
 }
 
-void Camera::update()
+void Camera::update(float deltaSeconds)
 {
-    glm::mat4 cameraRotation = getRotationMatrix();
-    position += glm::vec3(cameraRotation * glm::vec4(velocity * 0.5f, 0.f));
+    const float lengthSquared = glm::dot(velocity, velocity);
+    if (lengthSquared == 0.f) return;
+    const glm::vec3 direction = lengthSquared > 1.f ? velocity / glm::sqrt(lengthSquared) : velocity;
+    const glm::mat4 cameraRotation = getRotationMatrix();
+    position += glm::vec3(cameraRotation * glm::vec4(direction * movementSpeed * deltaSeconds, 0.f));
 }

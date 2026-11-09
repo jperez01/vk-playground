@@ -48,9 +48,6 @@ try {
     if (Get-Process -Name demo -ErrorAction SilentlyContinue) {
         throw 'A demo.exe is already running. Leave user instances untouched and close them before building.'
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $root 'assets/structure.glb') -PathType Leaf)) {
-        throw 'Missing assets/structure.glb; provide the real scene before running.'
-    }
     $cachePath = Join-Path $buildDirectory 'CMakeCache.txt'
     $cache = Get-Content -LiteralPath $cachePath
     function Get-CacheValue([string]$Name) {

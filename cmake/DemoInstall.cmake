@@ -53,6 +53,10 @@ install(PROGRAMS ${_demo_crt_files} DESTINATION . COMPONENT Demo)
 
 install(FILES "${DEMO_SCENE_FILE}" DESTINATION assets RENAME structure.glb COMPONENT Demo)
 install(FILES ${SPIRV_BINARY_FILES} DESTINATION spirv COMPONENT Demo)
+install(FILES
+    "${PROJECT_SOURCE_DIR}/resources/fonts/NotoSans-Regular.ttf"
+    "${PROJECT_SOURCE_DIR}/resources/fonts/OFL.txt"
+    DESTINATION fonts COMPONENT Demo)
 install(FILES "${PROJECT_SOURCE_DIR}/LICENSE.txt" DESTINATION . COMPONENT Demo)
 install(FILES "${PROJECT_SOURCE_DIR}/packaging/README.txt" DESTINATION . COMPONENT Demo)
 install(FILES "${PROJECT_SOURCE_DIR}/packaging/demo-scene.json"

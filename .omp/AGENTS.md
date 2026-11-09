@@ -16,7 +16,7 @@ Windows C++20 / Vulkan 1.3 renderer using SDL2, Dear ImGui, Slang shaders, and C
 - Existing profiles: `cmake-build-debug-visual-studio` (Debug, validation enabled) and `cmake-build-relwithdebinfo-visual-studio` (optimized, validation disabled).
 - In an x64 Visual Studio developer shell, from the repository root: `cmake --build cmake-build-debug-visual-studio --target demo`. `build.bat` also initializes the local MSVC environment and builds Debug.
 - Both profiles output to the same `bin/`; verify the binary's profile before running. Close your own renderer instance before rebuilding.
-- Launch `demo.exe` with `bin/` as the working directory. The default scene requires the untracked `assets/structure.glb`; dependencies are listed in `vcpkg.json`.
+- Launch `demo.exe` with `bin/` as the working directory. Startup is an empty editor workspace with a one-unit XZ grid and colored XYZ axes; no model assets are required. Keep `spirv/` and `fonts/` beside the executable. Dependencies are listed in `vcpkg.json`; import optional local models through **File → Load**.
 - For renderer changes, use `.omp/skills/renderer-check/SKILL.md`: build success alone is not runtime or validation proof. No command-line frame limit or automatic exit is implemented; close the window normally to exercise cleanup.
 - `scripts/renderer-smoke.ps1 -Profile Debug` automates the build and window lifecycle, writes logs/screenshots/report to a fresh evidence directory, and preserves saved ImGui settings. Read the report and inspect screenshots; feature-specific interactions still need a targeted check.
 
