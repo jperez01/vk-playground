@@ -42,18 +42,6 @@ void vkutil::transitionImage(
     vkCmdPipelineBarrier2(cmd, &depInfo);
 }
 
-void vkutil::transitionImageForComputeWrite(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout, VkImageLayout newLayout)
-{
-    transitionImage(
-        cmd,
-        image,
-        currentLayout,
-        newLayout,
-        VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-        0,
-        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        VK_ACCESS_2_SHADER_WRITE_BIT);
-}
 
 void vkutil::transitionImageForColorAttachment(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout, VkImageLayout newLayout)
 {
@@ -96,13 +84,18 @@ void vkutil::transitionImageForTransferDst(VkCommandBuffer cmd, VkImage image, V
 
 void vkutil::transitionImageForShaderSampling(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout, VkImageLayout newLayout)
 {
+    // Mipmap generation has already made every level's writes available when
+    // transitioning it to TRANSFER_SRC; direct uploads still need write availability.
+    const VkAccessFlags2 srcAccess = currentLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+        ? VK_ACCESS_2_TRANSFER_READ_BIT
+        : VK_ACCESS_2_TRANSFER_WRITE_BIT;
     transitionImage(
         cmd,
         image,
         currentLayout,
         newLayout,
         VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-        VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        srcAccess,
         VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
         VK_ACCESS_2_SHADER_READ_BIT);
 }

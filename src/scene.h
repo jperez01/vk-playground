@@ -9,6 +9,8 @@
 
 #include <vk_types.h>
 
+class VulkanEngine;
+
 struct Bounds {
     glm::vec3 origin;
     float sphereRadius;
@@ -86,6 +88,9 @@ struct MeshNode : public Node {
 };
 
 struct LoadedScene {
+    // Non-owning; the engine clears its scenes before destroying its GPU state.
+    VulkanEngine* owner { nullptr };
+
 
     // storage for all the data on a given gltf file
     std::unordered_map<std::string, std::shared_ptr<MeshAsset>> meshes;

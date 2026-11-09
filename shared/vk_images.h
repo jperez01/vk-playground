@@ -17,7 +17,6 @@ void transitionImage(
 	VkAccessFlags2 dstAccessMask,
 	VkImageAspectFlags aspectMask = VK_IMAGE_ASPECT_COLOR_BIT);
 
-void transitionImageForComputeWrite(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout, VkImageLayout newLayout);
 void transitionImageForColorAttachment(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout, VkImageLayout newLayout);
 void transitionImageForTransferSrc(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout, VkImageLayout newLayout);
 void transitionImageForTransferDst(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout, VkImageLayout newLayout);

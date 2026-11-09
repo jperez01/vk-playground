@@ -137,7 +137,7 @@ ZIP SHA256: $actualHash
 
 This is a DRAFT for human review. CI build/package checks are not GPU execution, visual inspection, or Vulkan validation proof. Review the exact candidate on supported hardware before manually publishing.
 
-Known Debug Vulkan validation errors remain: PRESENT_AFTER_WRITE presentation synchronization hazards, VUID-vkDestroySemaphore-semaphore-05149, and VUID-vkDestroySwapchainKHR-swapchain-01282 during cleanup. Optimized builds do not establish validation correctness; these diagnostics are not suppressed or treated as a pass.
+Local Debug validation on 2026-10-31 (RTX 5070 Ti) reported zero errors after synchronization/presentation-retirement fixes; external layer-name and small-allocation performance warnings remain. This is not validation proof for this release candidate or other GPUs/drivers. Swapchain-maintenance support is now required; see the bundled requirements.
 
 See the bundled README.txt for hardware requirements, controls, licensing, and limitations. The .zip.sha256 sidecar identifies the attached archive.
 "@

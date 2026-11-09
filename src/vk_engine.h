@@ -106,12 +106,16 @@ public:
     std::vector<VkImageView> swapchainImageViews;
     std::vector<VkSemaphore> swapchainRenderSemaphores;
     std::vector<bool> swapchainImageInitialized;
+    std::vector<VkFence> swapchainPresentFences;
+    std::vector<bool> swapchainPresentPending;
 
 	VkDescriptorSet drawImageDescriptors = VK_NULL_HANDLE;
 	VkDescriptorSetLayout drawImageDescriptorLayout;
     uint32_t globalTextureCount{ 0 };
     std::map<std::pair<VkImageView, VkSampler>, int> globalTextureSlots;
     int addGlobalTexture(VkImageView view, VkSampler sampler);
+    void forgetGlobalTexture(VkImageView view);
+    void forgetGlobalSampler(VkSampler sampler);
 
 
     VmaAllocator allocator; // vma lib allocator

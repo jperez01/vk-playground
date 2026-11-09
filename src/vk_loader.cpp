@@ -144,6 +144,7 @@ std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::
     fmt::print("Loading GLTF: {}", filePath);
 
     std::shared_ptr<LoadedScene> scene = std::make_shared<LoadedScene>();
+    scene->owner = engine;
     LoadedScene& file = *scene.get();
 
     fastgltf::Parser parser {};
@@ -316,6 +317,7 @@ std::optional<std::shared_ptr<LoadedScene>> loadGltf(VulkanEngine* engine, std::
         defaultMat->data.pipeline = &engine->meshPipelines.opaquePipeline;
         defaultMat->data.materialBuffer = materialBufferAddress + (data_index * sizeof(GPUGLTFMaterial));
     }
+    VK_CHECK(vmaFlushAllocation(engine->allocator, file.materialDataBuffer.allocation, 0, VK_WHOLE_SIZE));
 
     // all meshes in the file share one vertex buffer and one index buffer
     std::vector<uint32_t> indices;
@@ -482,6 +484,7 @@ std::optional<std::shared_ptr<LoadedScene>> loadModel(VulkanEngine* engine, cons
     if (!model.loaded) return {};
 
     auto scene = std::make_shared<LoadedScene>();
+    scene->owner = engine;
 
     UploadBatch batch(engine->uploadContext);
 
@@ -533,6 +536,7 @@ std::optional<std::shared_ptr<LoadedScene>> loadModel(VulkanEngine* engine, cons
         materials.push_back(newMat);
         scene->materials["material" + std::to_string(i)] = newMat;
     }
+    VK_CHECK(vmaFlushAllocation(engine->allocator, scene->materialDataBuffer.allocation, 0, VK_WHOLE_SIZE));
 
     std::vector<uint32_t> indices;
     std::vector<Vertex> vertices;

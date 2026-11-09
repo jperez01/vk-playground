@@ -115,7 +115,7 @@ Local checks exercised: actionlint 1.7.12 accepted both workflows; PowerShell pa
 
 The temporary verification drafts/tags were removed after inspection; no public release was published. Hosted provisioning recorded MSVC toolset `14.44.35207` / compiler `19.44.35229.0`, Vulkan SDK `1.4.350.0` / Slang `2026.8`, CMake `3.31.6` and Ninja `1.13.2`. Packaging and scene preparation ran under PowerShell 7; the draft publisher also ran successfully under the workflow's Windows PowerShell shell.
 
-Actual artifact runtime screenshots/logs are retained locally under `%TEMP%/vk-github-artifact-d2f58dd0c79a4def8f4dad8e45fc662a`. Runtime logs contained the existing Galaxy overlay naming warnings. This optimized check did not run Vulkan validation, camera/model-import interactions, or a clean-machine install. The existing Debug validation failures above remain unresolved.
+Actual artifact runtime screenshots/logs are retained locally under `%TEMP%/vk-github-artifact-d2f58dd0c79a4def8f4dad8e45fc662a`. Runtime logs contained the existing Galaxy overlay naming warnings. This optimized check did not run Vulkan validation, camera/model-import interactions, or a clean-machine install. The historical Debug failures above were subsequently addressed on the validation branch; see the separate evidence below.
 
 Default-branch push and manual-dispatch checks require the workflows to be merged into `master`; this change does not merge its own PR. Review and merge [PR #19](https://github.com/jperez01/vk-playground/pull/19), then inspect the resulting `master` build and manual-dispatch availability. These are explicit post-merge activation checks, not already exercised results. No GPU-tested or validation-clean claim follows from hosted-runner success alone.
 
@@ -127,7 +127,7 @@ Default-branch push and manual-dispatch checks require the workflows to be merge
 4. Run matching Debug Vulkan-validation checks separately. Report build, runtime/visual, and validation outcomes independently.
 5. Add README download links and a release checklist, including hardware requirements, known issues and evidence for the exact release candidate. Publish the draft only after reviewing that candidate.
 
-Existing synchronization/cleanup validation failures need a separately scoped renderer fix before any release is described as validation-clean. This packaging work neither fixes them nor grants an exemption.
+The separately scoped synchronization/cleanup fix now has local Debug evidence: zero validation errors on an RTX 5070 Ti for window recreation, present-mode changes, background switching, imports/replacement and normal shutdown. External layer-name and small-allocation performance warnings remain. Presentation retirement now requires swapchain-maintenance support. [Validation evidence and limits](VALIDATION_HANDOFF.md) do not replace checks of the exact release candidate or other hardware.
 
 ## Deliberately outside the initial scope
 

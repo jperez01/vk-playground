@@ -1,4 +1,5 @@
 #include "scene.h"
+#include "vk_engine.h"
 
 #include <vk_deletion_queue.h>
 
@@ -37,6 +38,14 @@ void LoadedScene::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
 
 void LoadedScene::clearAll()
 {
+    if (owner) {
+        for (auto& [name, image] : images) {
+            owner->forgetGlobalTexture(image.imageView);
+        }
+        for (VkSampler sampler : samplers) {
+            owner->forgetGlobalSampler(sampler);
+        }
+    }
     for (auto& sampler : samplers) {
         vkutil::deferDestroySampler(sampler);
     }
