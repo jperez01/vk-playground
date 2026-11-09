@@ -162,6 +162,8 @@ The 2026-10-31 Debug checks on an RTX 5070 Ti reported zero validation errors af
 
 The editor uses Dear ImGui docking: **Scene** starts on the left, **Files / Inspector** on the right, with a transparent central area over the existing renderer. Drag dividers to resize panes or drag tabs to rearrange them. **Stats** shares the left dock; **background** shares the right. ImGui saves docking arrangements in `imgui.ini` in the launch working directory; model selections and the set of imported files are not persisted.
 
+The central opening reserves at least **320 × 240 px** when panes are resized; adjust `minimumViewportSize` in `src/app/ui.cpp`. The native window has a **640 × 480 px** minimum client size. A local ImGui linkage-only patch exposes its existing dock-tree reflow helper so viewport constraints reuse native docking layout, without a second layout implementation.
+
 The file list contains loaded models, not a filesystem browser. File metadata and matrix readouts are read-only; node transforms can be edited using the attached gizmo. Loading the same source path again replaces that imported scene and clears node selection; different files with the same filename remain distinguishable by their full-path tooltips. Transform edits are session-only: reloading a model or restarting discards edits; model files are never overwritten. Selection is through the Scene tree, not viewport picking. The scene still renders across the entire window underneath the opaque side panes.
 
 ### Empty workspace and guides
@@ -179,6 +181,8 @@ The editor reuses [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo/tree/10
 `src/app/transform_gizmo.*` adapts ImGuizmo world-space edits back into each node's parent-relative local matrix and refreshes descendants. Non-invertible parent transforms disable editing rather than producing invalid matrices. Handles are clipped to the central dock opening and drawn above the scene but below editor windows. The selected node's full affine matrix is retained instead of decomposing/recomposing imported transforms. The inspector reflects changes on the following frame.
 
 `src/app/orientation_widget.*` adapts the camera's yaw/pitch to the library's quaternion interface. The six signed axis dots show the current orientation even with no object selected. Axis clicks snap immediately while retaining perspective; holding still or moving below ImGui's drag threshold remains a click, while dragging an axis dot or the gray sphere orbits. Drag release retains the orbited view without snapping back. Orbiting uses the selected node's world origin as pivot, or world origin with no selection. Instant snapping avoids upstream animation edge cases. The navigator stays at the top-right of the central 3D opening and hides when that opening is too small. Each gizmo blocks input while a popup is open; shared pointer capture prevents camera navigation or the other widget from competing.
+
+The corner navigator uses a compact **96 × 96 px** overlay with an 8 px inset. Its visual and label scales are set alongside `widgetSize` in `src/app/orientation_widget.cpp`; click and drag hit regions scale with the library's visuals.
 
 
 All ImGui text uses bundled **Noto Sans Regular at 18 px**, rasterized from TrueType rather than enlarging the default bitmap font. Change `editorFontSize` in `src/vk_engine.cpp` to adjust the global base size; no per-panel font overrides are needed. This is a fixed base size, not a runtime UI-scale or per-monitor DPI setting.

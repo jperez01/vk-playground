@@ -39,7 +39,7 @@ bool drawOrientationWidget(Camera& camera, ImVec2 clipPosition, ImVec2 clipSize,
     ImViewGuizmo::BeginFrame();
     capturesMouse = false;
 
-    constexpr float widgetSize = 144.f;
+    constexpr float widgetSize = 96.f;
     constexpr float margin = 8.f;
     if (!std::isfinite(clipPosition.x) || !std::isfinite(clipPosition.y)
         || !std::isfinite(clipSize.x) || !std::isfinite(clipSize.y)
@@ -94,7 +94,8 @@ bool drawOrientationWidget(Camera& camera, ImVec2 clipPosition, ImVec2 clipSize,
             && (!ImGui::IsMouseReleased(ImGuiMouseButton_Left) || ownsPress);
 
         auto& style = ImViewGuizmo::GetStyle();
-        style.scale = 0.8f;
+        style.scale = 0.55f;
+        style.labelSize = 0.85f;
         // Upstream's linear snap animation normalizes zero for opposite axes
         // and has no target direction at zero orbit distance. Instant snaps
         // use its safe quatLookAt path, including the vertical-axis fallback.

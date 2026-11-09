@@ -58,6 +58,7 @@ void VulkanEngine::init()
 
     window = SDL_CreateWindow("Vulkan Engine", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, windowExtent.width,
         windowExtent.height, window_flags);
+    SDL_SetWindowMinimumSize(window, 640, 480);
 
     initVulkan();
 

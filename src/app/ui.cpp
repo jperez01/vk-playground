@@ -18,6 +18,7 @@
 #include <unordered_map>
 #include <vector>
 
+
 std::optional<std::string> openFileDialog()
 {
     nfdopendialogu8args_t args = {};
@@ -96,6 +97,32 @@ void syncFiles(const VulkanEngine& engine)
     }
 }
 
+constexpr ImVec2 minimumViewportSize(320.f, 240.f);
+
+void reserveViewportSize(ImGuiDockNode* node, ImVec2 minimum)
+{
+    ImGuiDockNode* parent = node->ParentNode;
+    if (!parent) return;
+    ImGuiDockNode* sibling = parent->ChildNodes[parent->ChildNodes[0] == node ? 1 : 0];
+    const int axis = parent->SplitAxis;
+    const float separator = ImGui::GetStyle().DockingSeparatorSize;
+    const float paneMinimum = ImGui::GetStyle().WindowMinSize[axis];
+    ImVec2 parentMinimum = minimum;
+    if (sibling->IsVisible)
+        parentMinimum[axis] += paneMinimum + separator;
+    reserveViewportSize(parent, parentMinimum);
+
+    if (!sibling->IsVisible) return;
+    const float available = std::max(0.f, parent->Size[axis] - separator);
+    const float required = std::min(minimum[axis], std::max(0.f, available - paneMinimum));
+    if (node->Size[axis] >= required) return;
+
+    node->SizeRef[axis] = required;
+    sibling->SizeRef[axis] = available - required;
+    node->WantLockSizeOnce = sibling->WantLockSizeOnce = false;
+    ImGui::DockNodeTreeUpdatePosSize(parent, parent->Pos, parent->Size, nullptr);
+}
+
 ImGuiID drawDockspace()
 {
     const ImGuiID id = ImGui::GetID("EditorDockspace");
@@ -119,6 +146,8 @@ ImGuiID drawDockspace()
         state.resetLayout = false;
     }
     ImGui::DockSpaceOverViewport(id, viewport, ImGuiDockNodeFlags_PassthruCentralNode);
+    if (auto* center = ImGui::DockBuilderGetCentralNode(id))
+        reserveViewportSize(center, minimumViewportSize);
     return id;
 }
 
