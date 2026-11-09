@@ -49,4 +49,14 @@ target_sources(imgui PRIVATE
 
 target_link_libraries(imgui PUBLIC Vulkan::Vulkan SDL2::SDL2)
 
+# Pinned upstream gizmos; sources and MIT licenses are vendored for offline builds.
+add_library(imguizmo STATIC ImGuizmo/ImGuizmo.cpp)
+target_include_directories(imguizmo PUBLIC ImGuizmo)
+target_link_libraries(imguizmo PUBLIC imgui)
+set_property(TARGET imguizmo PROPERTY CXX_STANDARD 20)
+
+add_library(imviewguizmo INTERFACE)
+target_include_directories(imviewguizmo INTERFACE ImViewGuizmo)
+target_link_libraries(imviewguizmo INTERFACE imgui glm)
+
 target_include_directories(stb_image INTERFACE stb_image)

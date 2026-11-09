@@ -2,7 +2,7 @@ vk-playground - Windows x64 demo
 
 RUNNING
 Extract the entire ZIP to a normal folder, then run demo.exe. Keep the DLLs,
-assets/ and spirv/ folders beside the executable. Do not run from inside the ZIP.
+assets/, spirv/ and fonts/ folders beside the executable. Do not run from inside the ZIP.
 No Visual Studio, Vulkan SDK, Slang compiler or vcpkg installation is required.
 The executable is unsigned; Windows may display reputation warnings.
 
@@ -19,15 +19,28 @@ The Windows Vulkan loader and vendor driver are system prerequisites; this
 archive does not replace them. Microsoft release C++ runtime DLLs are included
 for app-local deployment. The Universal CRT is supplied by supported Windows.
 
-DEMO SCENE
-Polygonal Mind's CC0 Tomb Chaser 1 Layout Floor 01. A placement parent node
-positions it for the existing camera; geometry and textures are unchanged.
-Original source revision, license evidence and checksums accompany the package.
+OPTIONAL SAMPLE
+The editor starts empty, with an XZ grid (one-unit squares) and colored XYZ axes.
+No model assets are needed to launch. The package includes Polygonal Mind's CC0
+Tomb Chaser 1 Layout Floor 01 at assets/structure.glb for File -> Load.
+Its legacy placement parent node is retained; navigate the camera after loading.
+Geometry and textures are unchanged. Source revision, license and checksums
+accompany the package.
 
 CONTROLS
-W/A/S/D and mouse: move/look.
+W/A/S/D: move (default 2 units/second). Right mouse drag in the scene area: look.
+Camera -> Move speed: adjust travel speed; Ctrl+click the slider to type a value.
 File -> Load: open additional models (OBJ, FBX, glTF and other supported formats).
 Stats: timings and present mode. Background: effect and lighting controls.
+View -> Grid / Axes: toggle editor guides. One world unit represents one metre;
+imports retain their source scale. Guides are not scene objects.
+Select a Scene tree node to attach its object gizmo. Gizmo -> Translate / Rotate /
+Scale chooses the tool; Local axes switches space (scaling is always local).
+Left-drag object handles to edit. Changes are session-only, not saved to files.
+The top-right axis navigator shows camera orientation: click an axis to align,
+or hold and drag any axis dot or the gray sphere to orbit around the selected node
+or world origin. Releasing an orbit drag does not snap back to an axis.
+The editor uses bundled Noto Sans Regular at 18 px; no font installation is needed.
 
 BUILD IDENTITY
 See build-info.txt for the version, commit, working-tree state and configuration.
@@ -44,7 +57,8 @@ Build/package success does not mean the archive was GPU-tested.
 
 LICENSES
 The application license is LICENSE.txt. Third-party and demo-scene notices are
-in licenses/. Microsoft runtime distribution is subject to the applicable Visual
+in licenses/; the bundled Noto Sans font license is fonts/OFL.txt.
+Microsoft runtime distribution is subject to the applicable Visual
 Studio license terms and redistributable-code list:
 https://aka.ms/vs/18/redistribution
 Do not redistribute debug C++ runtime libraries.

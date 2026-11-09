@@ -16,7 +16,7 @@ add_subdirectory(third_party)
 
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
 set(DEMO_SCENE_FILE "${PROJECT_SOURCE_DIR}/assets/structure.glb" CACHE FILEPATH
-    "Default scene staged beside demo; packaging sets this to the checksum-verified scene")
+    "Optional sample scene staged beside demo; packaging sets this to the checksum-verified scene")
 set(DEMO_SCENE_SOURCE_FILE "" CACHE FILEPATH "Checksum-pinned source GLB used for a demo package")
 set(DEMO_SCENE_SHA256 "" CACHE STRING "Checksum of the prepared demo-package scene")
 set (CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
@@ -110,13 +110,24 @@ add_custom_target(
 add_custom_target(RuntimeResources
     COMMAND ${CMAKE_COMMAND} -E make_directory
         "$<TARGET_FILE_DIR:demo>/assets" "$<TARGET_FILE_DIR:demo>/spirv"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${DEMO_SCENE_FILE}" "$<TARGET_FILE_DIR:demo>/assets/structure.glb"
+        "$<TARGET_FILE_DIR:demo>/fonts"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${SPIRV_BINARY_FILES} "$<TARGET_FILE_DIR:demo>/spirv"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${PROJECT_SOURCE_DIR}/resources/fonts/NotoSans-Regular.ttf"
+        "${PROJECT_SOURCE_DIR}/resources/fonts/OFL.txt"
+        "$<TARGET_FILE_DIR:demo>/fonts"
     DEPENDS Shaders
     COMMAND_EXPAND_LISTS
     VERBATIM
 )
+
+# A sample model is optional; empty editor builds must not require local assets.
+if(EXISTS "${DEMO_SCENE_FILE}")
+    add_custom_command(TARGET RuntimeResources POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${DEMO_SCENE_FILE}" "$<TARGET_FILE_DIR:demo>/assets/structure.glb"
+        VERBATIM)
+endif()
 
 include(cmake/DemoInstall.cmake)

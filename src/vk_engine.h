@@ -16,6 +16,7 @@
 #include "scene.h"
 #include "gpu_profiler.h"
 #include "upload_batch.h"
+#include "editor_guides.h"
 #include <vk_deletion_queue.h>
 #include <vk_descriptors.h>
 #include <vk_pipelines.h>
@@ -123,6 +124,7 @@ public:
 	VkDescriptorSetLayout gpuSceneDataDescriptorLayout;
 
     MeshPipelines meshPipelines;
+    EditorGuides editorGuides;
 
     // draw resources
     AllocatedImage drawImage;
@@ -161,7 +163,7 @@ public:
     void init();
 
 	// run rendering code
-	void run(const glm::mat4& viewMatrix);
+	void run(Camera& camera);
 
     // shuts down the engine
     void cleanup();
@@ -171,7 +173,7 @@ public:
 
     void drawGeometry(VkCommandBuffer cmd);
 
-	void handleImGui();
+	void handleImGui(Camera& camera);
 	void resizeSwapchain();
 
     FrameData& getCurrentFrame();
@@ -221,7 +223,6 @@ private:
 
     void initSyncStructures();
 
-    void initRenderables();
 
     void initImGui();
 

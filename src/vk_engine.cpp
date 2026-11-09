@@ -1,7 +1,6 @@
 #include "vk_engine.h"
 
 #include "vk_images.h"
-#include "vk_loader.h"
 #include "vk_descriptors.h"
 #include "upload_batch.h"
 #include "runtime_paths.h"
@@ -34,11 +33,16 @@ constexpr bool bUseValidationLayers = false;
 constexpr bool bUseValidationLayers = true;
 #endif
 
+namespace {
+constexpr const char* editorFontFile = "fonts/NotoSans-Regular.ttf";
+constexpr float editorFontSize = 18.0f;
+}
+
 void VulkanEngine::init()
 {
-    const auto structurePath = vkutil::runtimePath("assets/structure.glb");
-    if (!std::filesystem::is_regular_file(structurePath)) {
-        throw std::runtime_error("Missing default scene: " + structurePath.string());
+    const auto fontPath = vkutil::runtimePath(editorFontFile);
+    if (!std::filesystem::is_regular_file(fontPath)) {
+        throw std::runtime_error("Missing editor font: " + fontPath.string());
     }
     for (const char* shaderFile : runtimeShaderFiles) {
         const auto shaderPath = vkutil::runtimePath(shaderFile);
@@ -71,14 +75,6 @@ void VulkanEngine::init()
 
     initImGui();
 
-    // Scene loading can fail after device resources exist. At this point all
-    // subsystems needed by cleanup() are initialized.
-    try {
-        initRenderables();
-    } catch (...) {
-        cleanup();
-        throw;
-    }
 }
 
 void VulkanEngine::initDefaultData() {
@@ -132,6 +128,7 @@ void VulkanEngine::cleanup()
     vkDeviceWaitIdle(device);
 
 	meshPipelines.clearResources(device);
+    editorGuides.cleanup(device);
 	
 	// Explicitly clear global resources so their RAII destructors fire before the device is destroyed
 	drawImage = {};
@@ -284,8 +281,6 @@ bool VulkanEngine::beginFrame(uint32_t& swapchainImageIndex)
 		swapchainPresentPending[swapchainImageIndex] = false;
 	}
 
-	drawExtent.height = std::min(swapchainExtent.height, drawImage.imageExtent.height) * renderScale;
-	drawExtent.width = std::min(swapchainExtent.width, drawImage.imageExtent.width) * renderScale;
 	return true;
 }
 
@@ -347,7 +342,7 @@ void VulkanEngine::recordGeometryPass(VkCommandBuffer cmd)
 	vkutil::transitionImageForColorAttachment(cmd, drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
 	VkClearValue clearValue{};
-	clearValue.color = { {0.0f, 0.0f, 0.0f, 1.0f} };
+	clearValue.color = { {0.020f, 0.022f, 0.025f, 1.0f} };
 	VkRenderingAttachmentInfo colorAttachment = vkinit::attachmentInfo(drawImage.imageView, &clearValue, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 	VkRenderingAttachmentInfo depthAttachment = vkinit::depthAttachmentInfo(depthImage.imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
@@ -690,6 +685,11 @@ void VulkanEngine::drawGeometry(VkCommandBuffer cmd)
     for (auto& r : opaqueDrawIndices) {
         draw(drawCommands.OpaqueSurfaces[r]);
     }
+    // Guides use the opaque depth buffer, but do not occlude transparent models.
+    editorGuides.draw(cmd, getCurrentFrame().globalDescriptor, sceneData.viewproj, drawExtent);
+    // The guide pipeline replaces the mesh bindings; force a rebind for transparency.
+    lastPipeline = nullptr;
+    lastMaterial = nullptr;
 
     // Dynamic state: transparent pass — no cull, depth test on but writes off
     vkCmdSetCullMode(cmd, VK_CULL_MODE_NONE);
@@ -709,15 +709,22 @@ void VulkanEngine::drawGeometry(VkCommandBuffer cmd)
     drawCommands.TransparentSurfaces.clear();
 }
 
-void VulkanEngine::run(const glm::mat4& viewMatrix)
+void VulkanEngine::run(Camera& camera)
 {
 	auto start = std::chrono::steady_clock::now();
 	if (resizeRequested) {
 		resizeSwapchain();
 	}
-	handleImGui();
+    // UI gizmos need this frame's projection, including immediately after resize.
+    drawExtent.height = static_cast<uint32_t>(std::min(swapchainExtent.height, drawImage.imageExtent.height) * renderScale);
+    drawExtent.width = static_cast<uint32_t>(std::min(swapchainExtent.width, drawImage.imageExtent.width) * renderScale);
+    if (drawExtent.width == 0 || drawExtent.height == 0) return;
+    sceneData.proj = glm::perspective(glm::radians(70.f),
+        static_cast<float>(drawExtent.width) / static_cast<float>(drawExtent.height), 10000.f, 0.1f);
+    sceneData.proj[1][1] *= -1;
+	handleImGui(camera);
 
-	updateScene(viewMatrix);
+	updateScene(camera.getViewMatrix());
 
 	draw();
 
@@ -729,16 +736,8 @@ void VulkanEngine::run(const glm::mat4& viewMatrix)
 
 void VulkanEngine::updateScene(const glm::mat4& viewMatrix)
 {
-	// camera projection
-	glm::mat4 projection = glm::perspective(glm::radians(70.f), (float)drawExtent.width / (float)drawExtent.height, 10000.f, 0.1f);
-
-	// invert the Y direction on projection matrix so that we are more similar
-	// to opengl and gltf axis
-	projection[1][1] *= -1;
-
 	sceneData.view = viewMatrix;
-	sceneData.proj = projection;
-	sceneData.viewproj = projection * viewMatrix;
+	sceneData.viewproj = sceneData.proj * viewMatrix;
 
     drawCommands.OpaqueSurfaces.clear();
     drawCommands.TransparentSurfaces.clear();
@@ -1064,22 +1063,6 @@ void VulkanEngine::initSyncStructures()
     }
 }
 
-void VulkanEngine::initRenderables()
-{
-	auto structureStart = std::chrono::steady_clock::now();
-    const auto structurePath = vkutil::runtimePath("assets/structure.glb");
-    auto structureFile = loadGltf(this, structurePath.string());
-
-    if (!structureFile) {
-        throw std::runtime_error("Failed to load default scene: " + structurePath.string());
-    }
-
-    loadedScenes["structure"] = *structureFile;
-	auto structureEnd = std::chrono::steady_clock::now();
-	auto structureElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(structureEnd - structureStart).count();
-	fmt::println("Time elapsed loading structure: {} ms", structureElapsed);
-
-}
 
 void VulkanEngine::initImGui()
 {
@@ -1117,6 +1100,13 @@ void VulkanEngine::initImGui()
 	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 	io.ConfigFlags ^= ImGuiConfigFlags_IsSRGB;
 
+    const auto fontPath = vkutil::runtimePath(editorFontFile).string();
+    io.FontDefault = io.Fonts->AddFontFromFileTTF(fontPath.c_str(), editorFontSize);
+    if (!io.FontDefault) {
+        throw std::runtime_error("Failed to load editor font: " + fontPath);
+    }
+    ImGui::GetStyle().FontSizeBase = editorFontSize;
+
 	// this initializes imgui for SDL
 	ImGui_ImplSDL2_InitForVulkan(window);
 
@@ -1149,6 +1139,7 @@ void VulkanEngine::initPipelines()
     initPostProcessPipeline();
 
     meshPipelines.buildPipelines(this);
+    editorGuides.init(device, gpuSceneDataDescriptorLayout, drawImage.imageFormat, depthImage.imageFormat);
 }
 
 void VulkanEngine::initDescriptors()
@@ -1309,63 +1300,15 @@ void VulkanEngine::initPostProcessPipeline() {
 	postProcessPipeline = vkutil::createComputePipeline(device, "post_process.comp", postProcessPipelineLayout);
 }
 
-void VulkanEngine::handleImGui() {
+void VulkanEngine::handleImGui(Camera& camera) {
 	// imgui new frame
 	ImGui_ImplVulkan_NewFrame();
 	ImGui_ImplSDL2_NewFrame();
 
 	ImGui::NewFrame();
 
-	Editor::handleUi(this);
+	Editor::handleUi(this, camera);
 
-	ImGui::Begin("Stats");
-
-	ImGui::Text("frametime %f ms", stats.frametime);
-	ImGui::Text("geometry record (CPU) %f ms", stats.geometryRecordTime);
-
-	if (gpuProfiler.supported()) {
-		ImGui::SeparatorText("GPU (ms)");
-		ImGui::Text("total %.3f", gpuProfiler.totalMs());
-		for (uint32_t i = 0; i < (uint32_t)GpuPass::Count; i++) {
-			GpuPass p = (GpuPass)i;
-			ImGui::Text("%s %.3f", GpuProfiler::passName(p), gpuProfiler.passMs(p));
-		}
-	} else {
-		ImGui::Text("GPU timestamps not supported");
-	}
-
-	const char* presentModeNames[] = { "FIFO (vsync)", "MAILBOX", "IMMEDIATE" };
-	const VkPresentModeKHR presentModes[] = { VK_PRESENT_MODE_FIFO_KHR, VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR };
-	int currentPresentMode = 0;
-	for (int i = 0; i < 3; i++) {
-		if (presentModes[i] == presentMode) currentPresentMode = i;
-	}
-	if (ImGui::Combo("Present mode", &currentPresentMode, presentModeNames, 3)) {
-		presentMode = presentModes[currentPresentMode];
-		resizeRequested = true;
-	}
-
-	ImGui::Text("triangles %i", stats.triangleCount);
-	ImGui::Text("draws %i", stats.drawcallCount);
-	ImGui::End();
-
-	ImGui::Begin("background");
-
-	ComputeEffect& selected = backgroundEffects[currentBackgroundEffect];
-
-	ImGui::Text("Selected effect: %s",selected.name);
-
-	ImGui::SliderInt("Effect Index", &currentBackgroundEffect, 0, backgroundEffects.size() - 1);
-
-	ImGui::InputFloat4("data1", (float*)&selected.data.data1);
-	ImGui::InputFloat4("data2", (float*)&selected.data.data2);
-	ImGui::InputFloat4("data3", (float*)&selected.data.data3);
-	ImGui::InputFloat4("data4", (float*)&selected.data.data4);
-
-	ImGui::SliderFloat4("Sunlight Color", (float*)&sceneData.sunlightColor, 0.0f, 1.0f);
-	ImGui::SliderFloat4("Sunlight Direction", (float*)&sceneData.sunlightDirection, -1.0f, 1.0f);
-
-	ImGui::End();
 
 	ImGui::Render();
 }
