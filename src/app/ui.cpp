@@ -354,9 +354,8 @@ void Editor::handleUi(VulkanEngine* engine, Camera& camera)
     const ImVec2 clipSize = center ? center->Size : viewport->WorkSize;
     const auto selected = state.selectedNode.lock();
     const glm::vec3 pivot = selected ? glm::vec3(selected->worldTransform[3]) : glm::vec3(0.f);
-    const bool popupOpen = ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
     Editor::drawOrientationWidget(camera, clipPosition, clipSize, pivot,
-        !popupOpen && !state.transformGizmo.isUsing());
+        !state.transformGizmo.isUsing());
 
     // Undo Vulkan's Y flip and reversed depth for ImGuizmo's screen convention.
     glm::mat4 gizmoProjection = engine->sceneData.proj;
@@ -365,7 +364,7 @@ void Editor::handleUi(VulkanEngine* engine, Camera& camera)
         gizmoProjection[column][2] = gizmoProjection[column][3] - gizmoProjection[column][2];
     state.transformGizmo.draw(selected.get(), camera.getViewMatrix(), gizmoProjection,
         viewport->Pos, viewport->Size, clipPosition, clipSize,
-        !popupOpen && !Editor::orientationWidgetCapturesMouse());
+        !Editor::orientationWidgetCapturesMouse());
     state.focusPrimaryPanes = false;
 }
 
