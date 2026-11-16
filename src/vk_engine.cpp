@@ -5,6 +5,7 @@
 #include "upload_batch.h"
 #include "runtime_paths.h"
 #include "runtime_shader_files.h"
+#include <algorithm>
 #include <stdexcept>
 
 #include <SDL.h>
@@ -52,9 +53,18 @@ void VulkanEngine::init()
     }
 
     // We initialize SDL and create a window with it.
+    // Opt in to per-monitor DPI awareness so Windows doesn't bitmap-stretch (blur) the window on scaled displays.
+    SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
     SDL_Init(SDL_INIT_VIDEO);
 
-    SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+    SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+
+    // Open at ~80% of the primary display's usable area (excludes taskbar) instead of a fixed 720p.
+    SDL_Rect usableBounds;
+    if (SDL_GetDisplayUsableBounds(0, &usableBounds) == 0 && usableBounds.w > 0 && usableBounds.h > 0) {
+        windowExtent.width = std::max<uint32_t>(1280, static_cast<uint32_t>(usableBounds.w * 0.8f));
+        windowExtent.height = std::max<uint32_t>(720, static_cast<uint32_t>(usableBounds.h * 0.8f));
+    }
 
     window = SDL_CreateWindow("Vulkan Engine", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, windowExtent.width,
         windowExtent.height, window_flags);
@@ -1107,6 +1117,16 @@ void VulkanEngine::initImGui()
         throw std::runtime_error("Failed to load editor font: " + fontPath);
     }
     ImGui::GetStyle().FontSizeBase = editorFontSize;
+
+    // Scale fonts and widget metrics to the monitor's DPI. Fonts are re-rasterized at the
+    // scaled size (ImGui 1.92 dynamic fonts), so text stays sharp instead of being stretched.
+    const float dpiScale = ImGui_ImplSDL2_GetContentScaleForWindow(window);
+    if (dpiScale > 0.0f) {
+        ImGui::GetStyle().ScaleAllSizes(dpiScale);
+        ImGui::GetStyle().FontScaleDpi = dpiScale;
+    }
+    // Keep following the monitor if the window is dragged to a display with a different scale.
+    io.ConfigDpiScaleFonts = true;
 
 	// this initializes imgui for SDL
 	ImGui_ImplSDL2_InitForVulkan(window);
