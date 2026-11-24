@@ -1915,6 +1915,10 @@ Result<Swapchain> SwapchainBuilder::build() const {
     VkSurfaceFormatKHR surface_format = detail::find_best_surface_format(surface_support.formats, desired_formats);
 
     VkExtent2D extent = detail::find_extent(surface_support.capabilities, info.desired_width, info.desired_height);
+    // A minimized surface may select zero even when the requested size is nonzero.
+    // Defer creation instead of passing an invalid imageExtent to Vulkan.
+    if (extent.width == 0 || extent.height == 0)
+        return Error{ SwapchainError::failed_create_swapchain, VK_ERROR_OUT_OF_DATE_KHR };
 
     uint32_t image_array_layers = info.array_layer_count;
     if (surface_support.capabilities.maxImageArrayLayers < info.array_layer_count)

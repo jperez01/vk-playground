@@ -25,6 +25,9 @@ add_subdirectory(shared)
 
 add_subdirectory(src)
 
+enable_testing()
+add_subdirectory(exercises)
+
 file(MAKE_DIRECTORY "${PROJECT_SOURCE_DIR}/spirv")
 file(GLOB_RECURSE SLANG_SOURCE_FILES
     "${PROJECT_SOURCE_DIR}/shaders/*.slang"

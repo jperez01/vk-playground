@@ -293,6 +293,8 @@ void drawStats(VulkanEngine& engine)
         }
         ImGui::Text("triangles %i", engine.stats.triangleCount);
         ImGui::Text("draws %i", engine.stats.drawcallCount);
+        ImGui::Text("culled surfaces %u / %u", engine.stats.culledSurfaces,
+            engine.stats.candidateSurfaces);
     }
     ImGui::End();
 }
@@ -344,6 +346,9 @@ void Editor::handleUi(VulkanEngine* engine, Camera& camera)
             ImGui::Separator();
             ImGui::MenuItem("Grid", nullptr, &engine->editorGuides.showGrid);
             ImGui::MenuItem("Axes", nullptr, &engine->editorGuides.showAxes);
+            ImGui::MenuItem("Frustum culling", nullptr, &engine->frustumCullingEnabled);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Disable to compare rendering and draw counts without frustum culling.");
             if (ImGui::MenuItem("Reset Layout")) state.resetLayout = true;
             ImGui::EndMenu();
         }

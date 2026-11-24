@@ -56,6 +56,8 @@ struct EngineStats {
     int triangleCount;
     int drawcallCount;
     float geometryRecordTime;
+    uint32_t candidateSurfaces { 0 };
+    uint32_t culledSurfaces { 0 };
 };
 
 class VulkanEngine;
@@ -125,6 +127,7 @@ public:
 
     MeshPipelines meshPipelines;
     EditorGuides editorGuides;
+    bool frustumCullingEnabled { true };
 
     // draw resources
     AllocatedImage drawImage;
@@ -174,7 +177,7 @@ public:
     void drawGeometry(VkCommandBuffer cmd);
 
 	void handleImGui(Camera& camera);
-	void resizeSwapchain();
+    bool resizeSwapchain();
 
     FrameData& getCurrentFrame();
     uint32_t getCurrentFrameSlot() const { return frameNumber % FRAME_OVERLAP; }
@@ -206,7 +209,7 @@ private:
 
     void initSwapchain();
 
-    void createSwapchain(uint32_t width, uint32_t height);
+    bool createSwapchain();
 
     void destroySwapchain();
 
