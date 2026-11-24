@@ -4,6 +4,7 @@
 #include "vk_descriptors.h"
 #include "upload_batch.h"
 #include "runtime_paths.h"
+#include "rendering_math.h"
 #include "runtime_shader_files.h"
 #include <stdexcept>
 
@@ -544,64 +545,45 @@ void VulkanEngine::draw()
 	submitAndPresent(cmd, swapchainImageIndex);
 }
 
-struct Frustum {
-    glm::vec4 planes[6];
-};
-
-// Gribb-Hartmann plane extraction; planes point inward and are normalized.
-Frustum extractFrustum(const glm::mat4& m) {
-    auto row = [&](int i) { return glm::vec4(m[0][i], m[1][i], m[2][i], m[3][i]); };
-
-    Frustum frustum;
-    frustum.planes[0] = row(3) + row(0);
-    frustum.planes[1] = row(3) - row(0);
-    frustum.planes[2] = row(3) + row(1);
-    frustum.planes[3] = row(3) - row(1);
-    frustum.planes[4] = row(2);
-    frustum.planes[5] = row(3) - row(2);
-
-    for (glm::vec4& plane : frustum.planes) {
-        plane /= glm::length(glm::vec3(plane));
-    }
-    return frustum;
-}
-
-bool isVisible(const RenderObject& obj, const Frustum& frustum) {
-    const glm::vec3 center = glm::vec3(obj.transform * glm::vec4(obj.bounds.origin, 1.f));
-    const float maxScale = std::max({ glm::length(glm::vec3(obj.transform[0])),
-        glm::length(glm::vec3(obj.transform[1])),
-        glm::length(glm::vec3(obj.transform[2])) });
-    const float radius = obj.bounds.sphereRadius * maxScale;
-
-    for (const glm::vec4& plane : frustum.planes) {
-        if (glm::dot(glm::vec3(plane), center) + plane.w < -radius) {
-            return false;
-        }
-    }
-    return true;
-}
 
 void VulkanEngine::drawGeometry(VkCommandBuffer cmd)
 {
-    const Frustum frustum = extractFrustum(sceneData.viewproj);
+    const auto frustumPlanes = frustumCullingEnabled
+        ? learning::extractFrustumPlanes(sceneData.viewproj) : learning::FrustumPlanes{};
     const glm::vec3 cameraPos = glm::vec3(glm::inverse(sceneData.view)[3]);
+    stats.candidateSurfaces = static_cast<uint32_t>(
+        drawCommands.OpaqueSurfaces.size() + drawCommands.TransparentSurfaces.size());
 
     opaqueDrawIndices.clear();
     for (uint32_t i = 0; i < drawCommands.OpaqueSurfaces.size(); i++) {
-        if (isVisible(drawCommands.OpaqueSurfaces[i], frustum)) {
-            opaqueDrawIndices.push_back(i);
+        const RenderObject& obj = drawCommands.OpaqueSurfaces[i];
+        if (frustumCullingEnabled) {
+            const auto bounds = learning::computeWorldBounds(
+                obj.bounds.origin, obj.bounds.extents, obj.transform);
+            if (!learning::isBoxPotentiallyVisible(bounds.center, bounds.halfExtents, frustumPlanes))
+                continue;
         }
+        opaqueDrawIndices.push_back(i);
     }
 
     transparentDraws.clear();
     for (uint32_t i = 0; i < drawCommands.TransparentSurfaces.size(); i++) {
         const RenderObject& obj = drawCommands.TransparentSurfaces[i];
-        if (isVisible(obj, frustum)) {
-            const glm::vec3 center = glm::vec3(obj.transform * glm::vec4(obj.bounds.origin, 1.f));
-            const glm::vec3 delta = center - cameraPos;
-            transparentDraws.emplace_back(glm::dot(delta, delta), i);
+        glm::vec3 center;
+        if (frustumCullingEnabled) {
+            const auto bounds = learning::computeWorldBounds(
+                obj.bounds.origin, obj.bounds.extents, obj.transform);
+            if (!learning::isBoxPotentiallyVisible(bounds.center, bounds.halfExtents, frustumPlanes))
+                continue;
+            center = bounds.center;
+        } else {
+            center = glm::vec3(obj.transform * glm::vec4(obj.bounds.origin, 1.f));
         }
+        const glm::vec3 delta = center - cameraPos;
+        transparentDraws.emplace_back(glm::dot(delta, delta), i);
     }
+    stats.culledSurfaces = stats.candidateSurfaces - static_cast<uint32_t>(
+        opaqueDrawIndices.size() + transparentDraws.size());
 
     // sort the opaque surfaces by material and mesh
     std::sort(opaqueDrawIndices.begin(), opaqueDrawIndices.end(), [&](const auto& iA, const auto& iB) {
@@ -713,9 +695,9 @@ void VulkanEngine::drawGeometry(VkCommandBuffer cmd)
 void VulkanEngine::run(Camera& camera)
 {
 	auto start = std::chrono::steady_clock::now();
-	if (resizeRequested) {
-		resizeSwapchain();
-	}
+    if (resizeRequested && !resizeSwapchain()) {
+        return;
+    }
     // UI gizmos need this frame's projection, including immediately after resize.
     drawExtent.height = static_cast<uint32_t>(std::min(swapchainExtent.height, drawImage.imageExtent.height) * renderScale);
     drawExtent.width = static_cast<uint32_t>(std::min(swapchainExtent.width, drawImage.imageExtent.width) * renderScale);
@@ -859,9 +841,12 @@ void VulkanEngine::initVulkan()
 
 void VulkanEngine::initSwapchain()
 {
-    createSwapchain(windowExtent.width, windowExtent.height);
-
-    createRenderTargets(windowExtent);
+    while (!createSwapchain()) {
+        SDL_Event event;
+        if (SDL_WaitEventTimeout(&event, 100) && event.type == SDL_QUIT)
+            throw std::runtime_error("Window closed before swapchain initialization");
+    }
+    createRenderTargets(swapchainExtent);
 }
 
 void VulkanEngine::createRenderTargets(VkExtent2D extent)
@@ -900,8 +885,15 @@ void VulkanEngine::writeDrawImageDescriptor()
 }
 
 
-void VulkanEngine::createSwapchain(uint32_t width, uint32_t height)
+bool VulkanEngine::createSwapchain()
 {
+    if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED)
+        return false;
+    int width = 0, height = 0;
+    SDL_Vulkan_GetDrawableSize(window, &width, &height);
+    if (width <= 0 || height <= 0)
+        return false;
+
 	vkb::SwapchainBuilder swapchainBuilder{ chosenGPU,device,surface };
 
 	swapchainImageFormat = VK_FORMAT_B8G8R8A8_UNORM;
@@ -920,17 +912,23 @@ void VulkanEngine::createSwapchain(uint32_t width, uint32_t height)
 	modesInfo.presentModeCount = 1;
 	modesInfo.pPresentModes = &presentMode;
 
-	vkb::Swapchain vkbSwapchain = swapchainBuilder
+    auto swapchainResult = swapchainBuilder
 		//.use_default_format_selection()
 		.set_desired_format(VkSurfaceFormatKHR{ .format = swapchainImageFormat, .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR })
 		.set_desired_present_mode(presentMode)
 		.set_desired_extent(width, height)
 		.add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
 		.add_pNext(&modesInfo)
-		.build()
-		.value();
+        .build();
+    if (!swapchainResult) {
+        if (swapchainResult.vk_result() == VK_ERROR_OUT_OF_DATE_KHR)
+            return false;
+        throw std::runtime_error("Failed to create swapchain: " + swapchainResult.error().message());
+    }
+    vkb::Swapchain vkbSwapchain = swapchainResult.value();
 
 	swapchainExtent = vkbSwapchain.extent;
+    windowExtent = swapchainExtent;
 	//store swapchain and its related images
 	swapchain = vkbSwapchain.swapchain;
 	swapchainImages = vkbSwapchain.get_images().value();
@@ -946,6 +944,7 @@ void VulkanEngine::createSwapchain(uint32_t width, uint32_t height)
 		VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &swapchainRenderSemaphores[i]));
 		VK_CHECK(vkCreateFence(device, &fenceCreateInfo, nullptr, &swapchainPresentFences[i]));
 	}
+    return true;
 }
 void VulkanEngine::destroySwapchain()
 {
@@ -977,35 +976,44 @@ void VulkanEngine::destroySwapchain()
 	swapchain = VK_NULL_HANDLE;
 }
 
-void VulkanEngine::resizeSwapchain()
+bool VulkanEngine::resizeSwapchain()
 {
+    resizeRequested = true;
+    if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED)
+        return false;
+
+    int width = 0, height = 0;
+    SDL_Vulkan_GetDrawableSize(window, &width, &height);
+    if (width <= 0 || height <= 0)
+        return false;
+
     if (timelineValue > 0) {
         VkSemaphoreWaitInfo waitInfo{};
         waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
-        waitInfo.pNext = nullptr;
-        waitInfo.flags = 0;
         waitInfo.semaphoreCount = 1;
         waitInfo.pSemaphores = &timelineSemaphore;
         waitInfo.pValues = &timelineValue;
-
         VK_CHECK(vkWaitSemaphores(device, &waitInfo, UINT64_MAX));
     }
 
-	int w, h;
-	SDL_GetWindowSize(window, &w, &h);
-	if (w == 0 || h == 0) {
-		return;
-	}
+    // SDL can retain a nonzero window size while the Vulkan surface is minimized.
+    // Check after waiting, before retiring any existing presentation resources.
+    VkSurfaceCapabilitiesKHR capabilities{};
+    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(chosenGPU, surface, &capabilities));
+    if (capabilities.currentExtent.width == 0 || capabilities.currentExtent.height == 0
+        || capabilities.maxImageExtent.width == 0 || capabilities.maxImageExtent.height == 0)
+        return false;
 
-	destroySwapchain();
+    destroySwapchain();
+    // The surface can change again inside the builder. A deferred creation leaves
+    // a null swapchain and the resize request pending; run() must skip this frame.
+    if (!createSwapchain())
+        return false;
 
-	windowExtent.width = w;
-	windowExtent.height = h;
-
-	createSwapchain(windowExtent.width, windowExtent.height);
-	createRenderTargets(windowExtent);
-	writeDrawImageDescriptor();
-	resizeRequested = false;
+    createRenderTargets(swapchainExtent);
+    writeDrawImageDescriptor();
+    resizeRequested = false;
+    return true;
 }
 
 void VulkanEngine::initCommands()

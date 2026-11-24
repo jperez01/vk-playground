@@ -1,4 +1,14 @@
 
+# Reusable CPU rendering math; consumers inherit headers, GLM, and language settings.
+add_library(rendering_math STATIC
+  rendering_math.h
+  rendering_math.cpp
+)
+target_compile_features(rendering_math PUBLIC cxx_std_20)
+target_compile_definitions(rendering_math PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
+target_include_directories(rendering_math PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(rendering_math PUBLIC glm)
+
 # Add source to this project's executable.
 add_library (vkguide_shared STATIC
   vk_types.h

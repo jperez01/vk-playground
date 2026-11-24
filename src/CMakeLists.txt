@@ -35,7 +35,7 @@ set_property(TARGET demo PROPERTY VS_DEBUGGER_WORKING_DIRECTORY $<TARGET_FILE_DI
 
 target_include_directories(demo PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 
-target_link_libraries(demo vkguide_shared vkbootstrap imgui imguizmo imviewguizmo fastgltf::fastgltf assimp::assimp nfd::nfd)
+target_link_libraries(demo vkguide_shared rendering_math vkbootstrap imgui imguizmo imviewguizmo fastgltf::fastgltf assimp::assimp nfd::nfd)
 add_dependencies(demo RuntimeResources)
 
 add_custom_command(TARGET demo POST_BUILD

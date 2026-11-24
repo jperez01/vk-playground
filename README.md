@@ -142,6 +142,10 @@ Exit codes: **0** automated checks passed, **1** prerequisite/build failure, **2
 
 The 2026-10-31 Debug checks on an RTX 5070 Ti reported zero validation errors after the synchronization and presentation-retirement fixes. Resize/minimize/restore, present-mode changes, background switching, model import/replacement and normal shutdown were exercised. External layer-name and small-allocation performance warnings remain; this is not a guarantee for untested GPUs or release artifacts. See [validation evidence and coverage](docs/VALIDATION_HANDOFF.md).
 
+For a quick manual window check, launch the **Debug** executable from `bin/` (or CLion), minimize for a few seconds, restore, resize, and close normally. Confirm rendering resumes and inspect stdout/stderr through shutdown, especially for `VUID-VkSwapchainCreateInfoKHR-imageExtent-01689`. This avoids the automated screenshot workflow when a user-driven check is preferred.
+
+Swapchain recreation defers while minimized or when the drawable/surface extent is zero, retaining the pending resize request and skipping rendering until recreation succeeds. A local vk-bootstrap guard also rejects a zero selected extent before calling `vkCreateSwapchainKHR`, covering a surface change during creation. Render targets use the actual swapchain extent.
+
 ## Controls
 
 | Input | Action |
@@ -154,10 +158,11 @@ The 2026-10-31 Debug checks on an RTX 5070 Ti reported zero validation errors af
 | **Files / Inspector** pane | Select a loaded model to inspect its source path, format, and resource counts |
 | **View** menu | Show/hide panes or **Reset Layout** to restore the default workspace |
 | **View → Grid / Axes** | Independently toggle the editor ground grid and world axes |
+| **View → Frustum culling** | Toggle world-space bounding-box culling; disable it for an unculled reference |
 | **Gizmo** menu | Choose Translate, Rotate, or Scale; toggle local/world axes (scaling always uses local axes) |
 | Object gizmo handles | Left-drag the selected node's arrows, planes, rings, or scale handles |
 | Top-right axis navigator | Click a signed axis to align the view; hold and drag any axis dot or the gray sphere to orbit |
-| **Stats** window | CPU and per-pass GPU timings, triangle and draw counts, and the present mode (FIFO, MAILBOX or IMMEDIATE) |
+| **Stats** window | CPU/GPU timings, triangle and draw counts, culled/candidate surface counts, and present mode |
 | **background** window | Switch the background effect and edit its parameters, the sun color and the sun direction |
 
 The editor uses Dear ImGui docking: **Scene** starts on the left, **Files / Inspector** on the right, with a transparent central area over the existing renderer. Drag dividers to resize panes or drag tabs to rearrange them. **Stats** shares the left dock; **background** shares the right. ImGui saves docking arrangements in `imgui.ini` in the launch working directory; model selections and the set of imported files are not persisted.
@@ -171,6 +176,8 @@ The file list contains loaded models, not a filesystem browser. File metadata an
 The app starts with no scene nodes or loaded files. The camera starts at `(4, 3, 4)` looking at the origin. Travel speed defaults to **2 units/second**; change it live under **Camera → Move speed**, or change the `movementSpeed` initializer in `shared/camera.h` for a different startup default. Speed is session-only. Movement uses elapsed seconds and normalizes diagonal input, so frame rate and diagonal travel do not increase speed. Frame deltas are capped at 0.1 seconds to limit jumps after stalls. The grid lies on the XZ plane at `Y = 0`; each square is **1 × 1 world units**, with **1 unit = 1 metre** as the editor convention. Imports retain their source scale; no unit conversion is performed. X is red, Y green, and Z blue. Axes are unbounded world-space lines, clipped only by the camera's visible volume and occluding models—not fixed-length segments or distance-faded guides. Guide visibility resets to enabled on launch.
 
 `src/editor_guides.*` owns one graphics pipeline and no mesh buffers. `shaders/editor_grid.slang` reconstructs a ground-plane hit from each pixel's camera ray, generates subdued one-unit minor lines and stronger ten-unit major lines, and fades the grid between 25 and 100 units from the camera. Euclidean screen derivatives keep grid lines thin at diagonal angles; each line family fades before becoming subpixel-dense to avoid horizon haze. Axes are analytically clipped against all six Vulkan frustum planes, then expanded into thin anti-aliased screen-space triangles without Vulkan wide-line features. A dark charcoal backdrop separates the grid from the colored axes. Guides render between opaque and transparent models in the existing geometry rendering scope, using reversed-Z depth tests with depth writes disabled. They are unlit, tone-mapped with the scene, and never appear in the scene hierarchy or file inspector. Geometry statistics continue to count model draws only.
+
+Frustum culling uses the shared `learning::extractFrustumPlanes`, `computeWorldBounds`, and `isBoxPotentiallyVisible` functions. Planes are extracted once per frame; each opaque or transparent surface's local bounds are transformed into a world-axis-aligned box before testing. Disabling **View → Frustum culling** skips the bounds/visibility work and submits every candidate surface. **Stats → culled surfaces** counts rejected draw surfaces, not scene nodes. This is frustum culling, not occlusion culling; objects hidden behind other objects can still be submitted. Transparent back-to-front sorting is retained.
 
 Editor presentation and selection state live in `src/app/ui.cpp`, with separate functions for the dock layout, scene tree, file inspector, stats, and background controls. Add panels there rather than adding UI construction to the renderer. Cached file labels and node-name lookups refresh when the loaded scene collection changes; weak references keep inspection from retaining replaced GPU scenes. SDL input routing stays in `src/app/application.cpp`, respects ImGui capture, and always forwards key releases to avoid stuck movement.
 
@@ -189,6 +196,23 @@ All ImGui text uses bundled **Noto Sans Regular at 18 px**, rasterized from True
 
 The unmodified font and SIL Open Font License are in `resources/fonts/`, sourced from [notofonts/noto-fonts at `ffebf8c1ee449e544955a7e813c54f9b73848eac`](https://github.com/notofonts/noto-fonts/tree/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSans). `NotoSans-Regular.ttf` SHA256: `b85c38ecea8a7cfb39c24e395a4007474fa5a4fc864f6ee33309eb4948d232d5`. Local builds and demo installs include both the font and its license; no system font installation or build-time download is required.
 
+## Learning exercises
+
+`shared/rendering_math.h` and `shared/rendering_math.cpp` own reusable bounds/frustum types and implementations. All exercise checks stay together in `exercises/rendering_exercises.cpp`. Extend the shared pair and the combined runner instead of creating files or targets per small function.
+
+Reload CMake in CLion, select the `rendering_exercises` executable, and run it. From an MSVC developer shell:
+
+```sh
+cmake --build cmake-build-debug-visual-studio --target rendering_exercises
+ctest --test-dir cmake-build-debug-visual-studio -R "^rendering_exercises$" --output-on-failure
+```
+
+The executable prints each check and returns nonzero if either group fails. It is written under the selected build tree's `exercises/` directory, excluded from normal builds, and not linked into `demo`. Running it needs no Vulkan runtime or model assets. C++20 and GLM are configured for IDE completion and diagnostics.
+
+`demo` and the exercise runner both link the `rendering_math` CMake library. It exports its header directory, C++20 requirement, GLM dependency, and Vulkan depth convention to consumers. Renderer sources can simply use `#include "rendering_math.h"` and the existing `learning::` API. New consumers need only `target_link_libraries(your_target PRIVATE rendering_math)`; never include a `.cpp` or manually add header search paths. The math library has no Vulkan runtime dependency or test `main()`, and the conditional dual-build setup has been removed.
+
+See [the frustum-culling completion roadmap and session handoff](docs/FRUSTUM_CULLING_ROADMAP.md) for current evidence, remaining CPU verification, and the staged path through indirect drawing, GPU visibility, and optional batching/compaction.
+
 ## Project layout
 
 | Path | Contents |
@@ -201,6 +225,7 @@ The unmodified font and SIL Open Font License are in `resources/fonts/`, sourced
 | `shared/` | Reusable Vulkan helpers: initializers, image transitions and blits, pipeline and descriptor builders, the camera, and the core types |
 | `shaders/` | Slang shaders. A file ending in `_comp` is a compute shader. Other files define `vertexMain` and/or `fragmentMain`. |
 | `docs/` | Design notes and improvement plans |
+| `exercises/` | On-demand C++ learning exercises, independent of the renderer |
 
 ## License
 
