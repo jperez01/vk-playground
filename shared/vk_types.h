@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_enum_string_helper.h>
@@ -152,6 +153,32 @@ struct GPUDrawPushConstants {
     VkDeviceAddress vertexBuffer;
     VkDeviceAddress materialBuffer;
 };
+
+// GPU frustum culling data. Mirrored in shaders/frustum_cull_comp.slang; change both together.
+// One GPUCullObject per draw-surface slot; slot i describes the same surface as indirect record i.
+struct GPUCullObject {
+    glm::vec4 center;      // xyz: world-space box center; w unused
+    glm::vec4 halfExtents; // xyz: nonnegative world-space half-sizes; w unused
+};
+static_assert(sizeof(GPUCullObject) == 32, "must match CullObject stride in frustum_cull_comp.slang");
+
+// Push constants for the culling dispatch (112 bytes, within the 128-byte guaranteed minimum).
+struct GPUCullPushConstants {
+    glm::vec4 planes[6];   // xyz: inward normal; w: offset. Order matches learning::extractFrustumPlanes.
+    uint32_t objectCount;  // number of valid slots this dispatch
+    uint32_t padding[3];
+};
+static_assert(sizeof(GPUCullPushConstants) == 112, "must match CullParams in frustum_cull_comp.slang");
+static_assert(offsetof(GPUCullPushConstants, objectCount) == 96, "objectCount follows six float4 planes");
+
+// Counters the culling shader accumulates with atomics, one pair per frame slot.
+// The CPU reads them back after that slot's timeline wait, so stats lag the current frame.
+struct GPUCullStats {
+    uint32_t visibleSurfaces;
+    uint32_t visibleTriangles;
+};
+static_assert(sizeof(GPUCullStats) == 8, "must match the two uints of cullStats in frustum_cull_comp.slang");
+static_assert(sizeof(VkDrawIndexedIndirectCommand) == 20, "indirect record is five 32-bit fields; the shader assumes this");
 
 #define VK_CHECK(x)                                                     \
     do {                                                                \

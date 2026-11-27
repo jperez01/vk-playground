@@ -1,6 +1,7 @@
 # Frustum culling: completion roadmap and session handoff
 
 Prepared: 2026-11-23  
+Updated: 2026-11-27  
 Branch: `feature/aabb-frustum-culling`
 
 This repository document is the canonical roadmap after merge. A matching snapshot is saved in the personal vault's `AI Docs/OMP` folder for convenient reading; update the repository version as implementation progresses.
@@ -48,12 +49,25 @@ Loader `Bounds::extents` are already half-extents. `RenderObject::transform` inc
 
 The previous engine-local sphere culling and plane extraction helpers have been removed. This is a clean cutover, not a second independent implementation to maintain.
 
+### GPU culling path (`View -> GPU culling`)
+
+`VulkanEngine::useGpuCulling` selects `drawGeometryGpuCulled` instead of `drawGeometry` at one call site in `recordGeometryPass`. The CPU path contains no GPU branches.
+
+1. `prepareGpuCulling` builds unculled, sorted opaque and transparent lists, then walks them in draw order. Slot `s` is the `s`-th surface drawn: all opaque first, then transparent far to near. For each slot it writes world bounds (`computeWorldBounds`) into `cullBoundsBuffer` and a `VkDrawIndexedIndirectCommand` into `indirectBuffer`, both per frame slot, then flushes them.
+2. `recordGpuCullDispatch` pushes the six planes, dispatches `shaders/frustum_cull_comp.slang` (one thread per slot, workgroup size 64), then records one barrier from compute shader write to draw-indirect read and one to host read of the counters. It runs before `vkCmdBeginRendering` because a dispatch cannot be recorded inside a rendering instance.
+3. The shader writes `instanceCount = 0` or `1` for every slot on every dispatch and atomically counts visible draws and triangles.
+4. `drawGeometryGpuCulled` issues one `vkCmdDrawIndexedIndirect` per slot, reading record `s`. It does not re-sort; a mismatch between listed surfaces and slots aborts.
+5. `collectGpuCullStats` publishes a frame slot's counters the next time that slot is used, after `beginFrame`'s timeline wait, so the read does not stall. The Stats window therefore shows the shader's visible draw and triangle counts two frames late. The CPU never learns per-surface decisions.
+
+The CPU **Frustum culling** toggle is ignored in this mode. The CPU/GPU layouts (`GPUCullObject`, `GPUCullPushConstants`, `GPUCullStats`) live in `shared/vk_types.h` with size assertions; the Slang structs must change with them. This version issues one call per candidate and is not a draw-call reduction.
+
 ### Controls and diagnostics
 
 - **View -> Frustum culling:** default enabled; disabling it bypasses bounds/visibility work and submits all candidate surfaces.
 - **Stats -> culled surfaces:** rejected surfaces / candidate surfaces, not scene-node counts.
 - Existing draw and triangle counters show the resulting submission workload.
 - `EngineStats::candidateSurfaces` and `culledSurfaces` hold the counts; `VulkanEngine::frustumCullingEnabled` controls the path.
+- **View -> GPU culling:** default off. With it on, Stats draw calls, triangles, and culled/candidate surfaces come from the shader's counters, two frames late. For about two frames after enabling it, Stats still show earlier CPU values. Draw calls then means visible draws, not API calls.
 
 The renderer still draws across the full window underneath opaque editor panes. Do not assume the central dock opening defines the projection/frustum independently.
 
@@ -97,6 +111,7 @@ A late surface change can still cause creation to defer after old resources were
 - A targeted renderer session closed normally with no captured validation error lines. The earlier lifecycle smoke still recorded the zero-extent error before the window fix.
 - **Post-window-fix validation output has not been independently reviewed.** User-reported recovery is runtime feedback, not proof that the validation log is clean.
 - No optimized performance benchmark has been recorded.
+- GPU culling: Debug build passed. The user reported the GPU path working in the app after the stats readback was added. No same-pose CPU/GPU count comparison is recorded here, Debug validation output for this path has not been reviewed, and no timings exist.
 
 The old lifecycle error is not an allowed baseline. If it reappears, investigate it rather than suppressing it or describing that run as validation-clean.
 
@@ -127,33 +142,22 @@ Floating-point boundary behavior must be considered explicitly. If a tolerance b
 
 ## 5. Milestone B: CPU-generated indirect draws
 
-This is the next implementation exercise after the baseline is accepted. Keep CPU culling, sorting, shaders, and material/index-buffer bindings unchanged initially.
+**Status: implemented and user-tested as a stepping stone, then removed as a separate mode.** Milestone C superseded it: the CPU-written-record path and its `useIndirectDraws` toggle were deleted, and the per-slot indirect buffer and flush/lifetime pattern now serve GPU culling. The direct CPU path with CPU frustum culling remains the comparison reference.
 
 ### Work
 
-- [ ] Trace the current direct `vkCmdDrawIndexed` arguments into a `VkDrawIndexedIndirectCommand` record:
-  - `indexCount = surface.indexCount`
-  - `instanceCount = 1`
-  - `firstIndex = surface.firstIndex`
-  - `vertexOffset = 0`
-  - `firstInstance = 0`
-- [ ] Allocate writable indirect-command storage per frame slot with `VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT` and a clear capacity/growth policy.
-- [ ] Wait for the slot's previous GPU use before rewriting its records. Reuse the existing timeline completion mechanism.
-- [ ] Write records for visible surfaces in the order needed by the existing draw loops.
-- [ ] Flush host-written allocation ranges when memory is non-coherent; respect the allocator's alignment/coherency requirements.
-- [ ] Replace each direct call with a one-record `vkCmdDrawIndexedIndirect` call using the corresponding byte offset.
-- [ ] Keep an explicit direct/indirect comparison mode during development.
-- [ ] Verify zero visible surfaces, buffer capacity transitions, opaque/transparent ordering, model replacement, resize, and normal cleanup.
+- [x] Trace the direct `vkCmdDrawIndexed` arguments into a `VkDrawIndexedIndirectCommand` record (`indexCount`, `instanceCount = 1`, `firstIndex`, `vertexOffset = 0`, `firstInstance = 0`).
+- [x] Allocate writable indirect-command storage per frame slot with `VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT` and a doubling growth policy (floor 256 records).
+- [x] Wait for the slot's previous GPU use before rewriting its records, using the existing timeline wait in `beginFrame`.
+- [x] Write records in draw order, not in visibility-loop order.
+- [x] Flush host-written ranges.
+- [x] Replace each direct call with a one-record `vkCmdDrawIndexedIndirect` call.
+- [x] Keep a direct/indirect comparison mode during development (later removed, see status).
+- [ ] Verification recorded: the user tested the zero-visible case and direct/indirect comparison. Growth beyond 256 records, model replacement, and resize were not separately recorded, and the Debug validation log was not reviewed.
 
-### Important constraints
+### Constraints that still apply
 
-An indirect record does not bind a pipeline, index buffer, descriptor set, or per-object push constants. One call per surface is deliberately the smallest correctness step. It may be slower and is **not** a submission optimization claim.
-
-Do not introduce batching, compacted IDs, new shader object lookup, or indirect-count drawing in this same milestone. Check command offset/stride alignment and range against Vulkan requirements.
-
-### Acceptance
-
-Direct and indirect paths render the same intended content and draw the same selected surfaces; buffers remain valid through their last GPU use; validation is clean for the exercised path. Record results, not just compilation success.
+An indirect record does not bind a pipeline, index buffer, descriptor set, or per-object push constants. One call per surface is the smallest correctness step; it is **not** a submission optimization claim.
 
 ## 6. Milestone C: GPU frustum testing with fixed command slots
 
@@ -161,19 +165,17 @@ Move only visibility decisions onto the GPU. Avoid compaction and GPU-generated 
 
 ### Work
 
-- [ ] Give each candidate draw surface a stable indirect-command slot.
-- [ ] Keep static geometry fields correct and have compute write `instanceCount = 0` or `1` **for every candidate each dispatch**.
-- [ ] Upload world-space bounds and camera planes for the intended frame.
-- [ ] Use an explicit GPU data layout. Do not upload a C++ structure containing `glm::vec3` and assume it matches shader packing; define matching padded fields and check sizes/offsets.
-- [ ] Include `VK_BUFFER_USAGE_STORAGE_BUFFER_BIT` on buffers written/read as storage, in addition to indirect usage where applicable.
-- [ ] Start on the existing graphics/compute-capable queue, not async compute.
-- [ ] Add the same-queue dependency from compute shader writes to indirect-command reads:
-  - source stage/access: compute shader / shader write;
-  - destination stage/access: draw indirect / indirect command read.
-- [ ] If compute also writes data consumed by vertex shaders, add the corresponding vertex-shader storage-read dependency for that resource. An indirect-read barrier alone does not cover it.
-- [ ] Retain per-slot lifetime protection. A current-frame barrier does not protect against overwriting an earlier frame's resources.
-- [ ] Verify dispatch sizing and shader bounds checks for counts not divisible by the workgroup size.
-- [ ] Compare GPU visibility decisions with the CPU reference using explicit diagnostic readback after completion. Do not add a blocking readback to the normal frame loop.
+- [x] Give each candidate draw surface a stable indirect-command slot (slot = position in final draw order).
+- [x] Keep static geometry fields correct and have compute write `instanceCount = 0` or `1` for every candidate each dispatch.
+- [x] Upload world-space bounds (storage buffer) and camera planes (push constants) for the frame.
+- [x] Use an explicit GPU data layout with matching padded fields and `static_assert`s on size and offsets.
+- [x] Include `VK_BUFFER_USAGE_STORAGE_BUFFER_BIT` on buffers written or read as storage.
+- [x] Start on the existing graphics/compute-capable queue, not async compute.
+- [x] Add the same-queue dependency from compute shader write to draw-indirect command read.
+- [x] Vertex-shader storage-read dependency: not applicable, because compute writes only `instanceCount`, which vertex shaders do not read.
+- [x] Retain per-slot lifetime protection (per-slot buffers, `beginFrame` timeline wait).
+- [ ] Verify dispatch sizing and shader bounds checks for counts not divisible by the workgroup size: implemented (`ceil(n / 64)` groups, `slot >= objectCount` guard) but not specifically exercised with a recorded non-multiple count.
+- [ ] Compare GPU visibility decisions with the CPU reference: partial. Shader atomic counters are read back after the slot's existing timeline wait, with no extra stall, giving aggregate visible draws and triangles. No per-surface comparison and no recorded same-pose CPU/GPU count comparison exist.
 
 ### Critical edge cases
 
@@ -248,7 +250,7 @@ The assistant may delegate sufficiently scoped routine work to the configured GP
 
 ## 10. Future-session starter prompt
 
-> Continue `docs/FRUSTUM_CULLING_ROADMAP.md`. First inspect current code and identify the next unfinished milestone; do not assume this snapshot is still current. Keep the scope to one milestone. I am learning rendering/engine engineering: provide scaffolding and tests, let me implement the central learning slice, and review my reasoning. Reuse `shared/rendering_math.*` and the combined exercise runner. Run focused automated checks, then let me test the app; no lengthy screenshot automation. Preserve validation diagnostics and report unverified scenarios. The next planned feature after closing the CPU baseline is CPU-generated indirect draws, not immediate batching or GPU compaction.
+> Continue `docs/FRUSTUM_CULLING_ROADMAP.md`. First inspect current code and identify the next unfinished milestone; do not assume this snapshot is still current. Keep the scope to one milestone. I am learning rendering/engine engineering: provide scaffolding and tests, let me implement the central learning slice, and review my reasoning. Reuse `shared/rendering_math.*` and the combined exercise runner. Run focused automated checks, then let me test the app; no lengthy screenshot automation. Preserve validation diagnostics and report unverified scenarios. Milestone A (CPU baseline) is still open, and GPU fixed-slot culling (Milestone C) is implemented but unvalidated: review its Debug validation log and compare CPU/GPU counts at a fixed pose before starting Milestone D batching, which is optional and measurement-driven.
 
 ## 11. Completion record
 
@@ -257,7 +259,7 @@ Update this section as evidence is obtained:
 - CPU implementation and shared tests: **implemented; 111 checks passed**.
 - Integrated culling runtime: **user reported working; counters exercised; fixed-pose equivalence not established in the interrupted automated comparison**.
 - Zero-extent window fix: **Debug build passed; user reported recovery; post-fix validation-log review pending**.
-- CPU-generated indirect drawing: **not started**.
-- GPU fixed-slot visibility: **not started**.
+- CPU-generated indirect drawing: **implemented and user-tested; the separate mode was later removed in favor of GPU culling**.
+- GPU fixed-slot visibility: **implemented; Debug build passed; user reported it working in the app; validation-log review, fixed-pose CPU/GPU count comparison, and per-surface comparison pending**.
 - Batching/compaction: **not started; optional and measurement-driven**.
 - Optimized performance comparison: **not recorded**.

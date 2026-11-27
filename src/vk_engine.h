@@ -41,6 +41,19 @@ struct FrameData {
 	VkSemaphore swapchainSemaphore;
 	uint64_t frameTimelineValue {0};
     AllocatedBuffer sceneDataBuffer;
+    // World-space bounds for GPU culling; slot i matches indirect record i. Same capacity as indirectBuffer.
+    AllocatedBuffer cullBoundsBuffer;
+    // Binds cullBoundsBuffer (0) and indirectBuffer (1) for the culling compute pass. Rewritten on growth.
+    VkDescriptorSet cullDescriptor { VK_NULL_HANDLE };
+    // VkDrawIndexedIndirectCommand records for GPU culling: one per candidate slot, in draw order.
+    // The CPU writes everything except instanceCount; the culling shader writes that every dispatch.
+    // Safe to rewrite after beginFrame waits on frameTimelineValue.
+    AllocatedBuffer indirectBuffer;
+    uint32_t indirectCapacity { 0 };
+    // GPUCullStats written by the culling shader; host-readable, zeroed before every dispatch.
+    AllocatedBuffer cullStatsBuffer;
+    // Candidate count of the dispatch whose counters cullStatsBuffer holds; 0 when nothing is pending readback.
+    uint32_t cullStatsCandidates { 0 };
     VkDescriptorSet globalDescriptor;
 
     VkCommandPool commandPool;
@@ -124,10 +137,16 @@ public:
     VmaAllocator allocator; // vma lib allocator
 
 	VkDescriptorSetLayout gpuSceneDataDescriptorLayout;
+    VkDescriptorSetLayout cullDescriptorLayout { VK_NULL_HANDLE };
+    VkPipelineLayout cullPipelineLayout { VK_NULL_HANDLE };
+    VkPipeline cullPipeline { VK_NULL_HANDLE };
 
     MeshPipelines meshPipelines;
     EditorGuides editorGuides;
     bool frustumCullingEnabled { true };
+    // GPU frustum culling (View > GPU culling): replaces the CPU visibility/sort path with drawGeometryGpuCulled.
+    // A compute pass writes instanceCount (0/1) for every candidate; frustumCullingEnabled is ignored.
+    bool useGpuCulling { false };
 
     // draw resources
     AllocatedImage drawImage;
@@ -180,6 +199,9 @@ public:
     bool resizeSwapchain();
 
     FrameData& getCurrentFrame();
+    // Ensures the current slot's indirect buffer holds at least `records` commands.
+    // Replacing it defers destruction until the timeline retires earlier uses.
+    void ensureIndirectCapacity(uint32_t records);
     uint32_t getCurrentFrameSlot() const { return frameNumber % FRAME_OVERLAP; }
 
     PFN_vkCmdPushDescriptorSetKHR vkCmdPushDescriptorSetKHR;
@@ -194,6 +216,13 @@ public:
 private:
     std::vector<uint32_t> opaqueDrawIndices;
     std::vector<std::pair<float, uint32_t>> transparentDraws;
+    // Slots produced by prepareGpuCulling() this frame; 0 when GPU culling is off or nothing is a candidate.
+    uint32_t gpuCullSlotCount { 0 };
+    uint32_t prepareGpuCulling();
+    void recordGpuCullDispatch(VkCommandBuffer cmd, uint32_t slotCount);
+    void writeSceneData();
+    void drawGeometryGpuCulled(VkCommandBuffer cmd);
+    void collectGpuCullStats();
 
     void updateScene(const glm::mat4& viewMatrix);
     bool beginFrame(uint32_t& swapchainImageIndex);
@@ -221,6 +250,7 @@ private:
     void initPipelines();
     void initBackgroundPipelines();
 	void initPostProcessPipeline();
+    void initCullPipeline();
 
     void initDescriptors();
 
