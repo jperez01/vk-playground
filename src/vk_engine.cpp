@@ -154,6 +154,11 @@ void VulkanEngine::cleanup()
 
     for (auto& frame : frames) {
         frame.sceneDataBuffer = {};
+        frame.indirectBuffer = {};
+        frame.indirectCapacity = 0;
+        frame.cullBoundsBuffer = {};
+        frame.cullStatsBuffer = {};
+        frame.cullStatsCandidates = 0;
     }
     deletionQueue.flushAll(device, allocator);
 
@@ -184,6 +189,8 @@ void VulkanEngine::cleanup()
 	vkDestroyPipelineLayout(device, gradientPipelineLayout, nullptr);
 
 	vkDestroyPipeline(device, postProcessPipeline, nullptr);
+	vkDestroyPipeline(device, cullPipeline, nullptr);
+	vkDestroyPipelineLayout(device, cullPipelineLayout, nullptr);
 	vkDestroyPipelineLayout(device, postProcessPipelineLayout, nullptr);
 
 	vkDestroyDescriptorPool(device, globalDescriptorAllocator.pool, nullptr);
@@ -192,6 +199,7 @@ void VulkanEngine::cleanup()
 	vkDestroyDescriptorSetLayout(device, drawImageDescriptorLayout, nullptr);
 	vkDestroyDescriptorSetLayout(device, gpuSceneDataDescriptorLayout, nullptr);
 	vkDestroyDescriptorSetLayout(device, postProcessImageLayout, nullptr);
+	vkDestroyDescriptorSetLayout(device, cullDescriptorLayout, nullptr);
 
     destroySwapchain();
 
@@ -341,6 +349,21 @@ void VulkanEngine::recordGeometryPass(VkCommandBuffer cmd)
 	const uint32_t slot = getCurrentFrameSlot();
 
 	gpuProfiler.begin(cmd, slot, GpuPass::Geometry);
+
+	// The culling dispatch must be recorded outside the rendering instance begun below.
+	gpuCullSlotCount = 0;
+	if (useGpuCulling) {
+		collectGpuCullStats();
+		gpuCullSlotCount = prepareGpuCulling();
+		if (gpuCullSlotCount > 0) {
+			recordGpuCullDispatch(cmd, gpuCullSlotCount);
+		} else {
+			stats.candidateSurfaces = 0;
+			stats.culledSurfaces = 0;
+			stats.drawcallCount = 0;
+			stats.triangleCount = 0;
+		}
+	}
 	vkutil::transitionImage(
 		cmd,
 		depthImage.image,
@@ -362,7 +385,11 @@ void VulkanEngine::recordGeometryPass(VkCommandBuffer cmd)
 
 	vkCmdBeginRendering(cmd, &renderInfo);
 	auto start = std::chrono::steady_clock::now();
-	drawGeometry(cmd);
+	if (useGpuCulling) {
+		drawGeometryGpuCulled(cmd);
+	} else {
+		drawGeometry(cmd);
+	}
 
 	auto end = std::chrono::steady_clock::now();
 	auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
@@ -555,7 +582,271 @@ void VulkanEngine::draw()
 	submitAndPresent(cmd, swapchainImageIndex);
 }
 
+// Grows the current slot's indirect and cull-bounds buffers together so record i and bounds slot i always exist as a pair.
+void VulkanEngine::ensureIndirectCapacity(uint32_t records)
+{
+    FrameData& frame = getCurrentFrame();
+    if (records <= frame.indirectCapacity) return;
 
+    uint32_t capacity = std::max<uint32_t>(frame.indirectCapacity, 256);
+    while (capacity < records) capacity *= 2;
+
+    // STORAGE_BIT: the culling compute shader writes instanceCount into these records.
+    frame.indirectBuffer = vkutil::createBuffer(allocator,
+        sizeof(VkDrawIndexedIndirectCommand) * capacity,
+        VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, vkutil::HOST_WRITE_MAPPED);
+    frame.cullBoundsBuffer = vkutil::createBuffer(allocator,
+        sizeof(GPUCullObject) * capacity,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, vkutil::HOST_WRITE_MAPPED);
+    frame.indirectCapacity = capacity;
+
+    // Safe to rewrite: beginFrame already waited for this slot's previous GPU use.
+    VkDescriptorBufferInfo boundsInfo{ frame.cullBoundsBuffer.buffer, 0, VK_WHOLE_SIZE };
+    VkDescriptorBufferInfo commandsInfo{ frame.indirectBuffer.buffer, 0, VK_WHOLE_SIZE };
+    VkWriteDescriptorSet writes[2]{};
+    for (uint32_t i = 0; i < 2; i++) {
+        writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[i].dstSet = frame.cullDescriptor;
+        writes[i].dstBinding = i;
+        writes[i].descriptorCount = 1;
+        writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    }
+    writes[0].pBufferInfo = &boundsInfo;
+    writes[1].pBufferInfo = &commandsInfo;
+    vkUpdateDescriptorSets(device, 2, writes, 0, nullptr);
+}
+
+void VulkanEngine::initCullPipeline()
+{
+    VkPushConstantRange pushRange{};
+    pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    pushRange.offset = 0;
+    pushRange.size = sizeof(GPUCullPushConstants);
+
+    VkPipelineLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    layoutInfo.setLayoutCount = 1;
+    layoutInfo.pSetLayouts = &cullDescriptorLayout;
+    layoutInfo.pushConstantRangeCount = 1;
+    layoutInfo.pPushConstantRanges = &pushRange;
+    VK_CHECK(vkCreatePipelineLayout(device, &layoutInfo, nullptr, &cullPipelineLayout));
+
+    cullPipeline = vkutil::createComputePipeline(device, "frustum_cull.comp", cullPipelineLayout);
+}
+
+
+// Builds this frame's slot lists plus per-slot world bounds and indirect records. Runs before vkCmdBeginRendering.
+// Slot s is the s-th surface drawn: all opaque (sorted) first, then all transparent (far to near).
+// Returns the slot count; 0 means nothing was written and the buffers may not exist yet.
+uint32_t VulkanEngine::prepareGpuCulling()
+{
+	const glm::vec3 cameraPos = glm::vec3(glm::inverse(sceneData.view)[3]);
+
+	opaqueDrawIndices.clear();
+	for (uint32_t i = 0; i < drawCommands.OpaqueSurfaces.size(); i++) {
+		opaqueDrawIndices.push_back(i);
+	}
+	std::sort(opaqueDrawIndices.begin(), opaqueDrawIndices.end(), [&](const auto& iA, const auto& iB) {
+		const RenderObject& A = drawCommands.OpaqueSurfaces[iA];
+		const RenderObject& B = drawCommands.OpaqueSurfaces[iB];
+		if (A.material == B.material) {
+			return A.indexBuffer < B.indexBuffer;
+		} else {
+			return A.material < B.material;
+		}
+	});
+
+	transparentDraws.clear();
+	for (uint32_t i = 0; i < drawCommands.TransparentSurfaces.size(); i++) {
+		const RenderObject& obj = drawCommands.TransparentSurfaces[i];
+		glm::vec3 center = glm::vec3(obj.transform * glm::vec4(obj.bounds.origin, 1.f));
+		const glm::vec3 delta = center - cameraPos;
+		transparentDraws.emplace_back(glm::dot(delta, delta), i);
+	}
+	std::sort(transparentDraws.begin(), transparentDraws.end(), [](const auto& a, const auto& b) {
+		return a.first > b.first;
+	});
+
+	const size_t totalCount = transparentDraws.size() + opaqueDrawIndices.size();
+	if (totalCount == 0) return 0;
+	ensureIndirectCapacity(totalCount);
+
+	auto& frameData = getCurrentFrame();
+	auto cullBoundsBuffer = static_cast<GPUCullObject*>(frameData.cullBoundsBuffer.allocation->GetMappedData());
+	auto indirectBuffer = static_cast<VkDrawIndexedIndirectCommand*>(frameData.indirectBuffer.allocation->GetMappedData());
+
+	uint32_t currentSlot = 0;
+	auto storeDrawData = [&](const RenderObject& r)
+	{
+		auto worldBounds = learning::computeWorldBounds(r.bounds.origin, r.bounds.extents, r.transform);
+		cullBoundsBuffer[currentSlot] = {
+			.center = glm::vec4(worldBounds.center, 0),
+			.halfExtents = glm::vec4(worldBounds.halfExtents, 0)
+		};
+		indirectBuffer[currentSlot] = VkDrawIndexedIndirectCommand(
+			r.indexCount, 1, r.firstIndex, 0, 0);
+
+		currentSlot++;
+	};
+	for (auto opaqueDrawIndex : opaqueDrawIndices)
+	{
+		storeDrawData(drawCommands.OpaqueSurfaces[opaqueDrawIndex]);
+	}
+	for (auto& [distance, index] : transparentDraws) {
+		storeDrawData(drawCommands.TransparentSurfaces[index]);
+	}
+
+	vmaFlushAllocation(allocator, frameData.cullBoundsBuffer.allocation, 0, sizeof(GPUCullObject) * totalCount);
+	vmaFlushAllocation(allocator, frameData.indirectBuffer.allocation, 0, sizeof(VkDrawIndexedIndirectCommand) * totalCount);
+
+	return totalCount;
+}
+
+// Publishes the counters of this slot's previous GPU-culled frame. beginFrame already waited for it, so the
+// read does not stall. These stats therefore describe that earlier frame, not the one being recorded.
+void VulkanEngine::collectGpuCullStats()
+{
+    FrameData& frame = getCurrentFrame();
+    if (frame.cullStatsCandidates == 0) return;
+
+    VK_CHECK(vmaInvalidateAllocation(allocator, frame.cullStatsBuffer.allocation, 0, sizeof(GPUCullStats)));
+    const auto* gpuStats = static_cast<const GPUCullStats*>(frame.cullStatsBuffer.allocation->GetMappedData());
+    stats.candidateSurfaces = frame.cullStatsCandidates;
+    stats.culledSurfaces = frame.cullStatsCandidates - gpuStats->visibleSurfaces;
+    stats.drawcallCount = static_cast<int>(gpuStats->visibleSurfaces);
+    stats.triangleCount = static_cast<int>(gpuStats->visibleTriangles);
+    frame.cullStatsCandidates = 0;
+}
+
+// Dispatches the culling shader over slotCount slots, then makes its writes visible to indirect draws.
+void VulkanEngine::recordGpuCullDispatch(VkCommandBuffer cmd, uint32_t slotCount)
+{
+    FrameData& frame = getCurrentFrame();
+
+    // Safe to rewrite: beginFrame waited for this slot, and collectGpuCullStats already read the old values.
+    *static_cast<GPUCullStats*>(frame.cullStatsBuffer.allocation->GetMappedData()) = {};
+    VK_CHECK(vmaFlushAllocation(allocator, frame.cullStatsBuffer.allocation, 0, sizeof(GPUCullStats)));
+    frame.cullStatsCandidates = slotCount;
+
+    GPUCullPushConstants push{};
+    const auto planes = learning::extractFrustumPlanes(sceneData.viewproj);
+    for (size_t i = 0; i < planes.size(); i++) {
+        push.planes[i] = glm::vec4(planes[i].inwardNormal, planes[i].offset);
+    }
+    push.objectCount = slotCount;
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipelineLayout, 0, 1, &frame.cullDescriptor, 0, nullptr);
+    vkCmdPushConstants(cmd, cullPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
+
+    constexpr uint32_t cullWorkgroupSize = 64; // must equal numthreads in frustum_cull_comp.slang
+    vkCmdDispatch(cmd, (slotCount + cullWorkgroupSize - 1) / cullWorkgroupSize, 1, 1);
+
+    // Same queue: compute shader writes -> indirect command reads by the draws recorded afterwards,
+    // and -> host reads of the counters once the frame slot's timeline value has been waited on.
+    VkMemoryBarrier2 barriers[2]{ { VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 }, { VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 } };
+    barriers[0].srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    barriers[0].srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+    barriers[0].dstStageMask = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
+    barriers[0].dstAccessMask = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+    barriers[1].srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    barriers[1].srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+    barriers[1].dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+    barriers[1].dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+
+    VkDependencyInfo dependency{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+    dependency.memoryBarrierCount = 2;
+    dependency.pMemoryBarriers = barriers;
+    vkCmdPipelineBarrier2(cmd, &dependency);
+}
+
+namespace {
+
+// Binds pipeline, material, index buffer and push constants for one surface; the caller issues the draw.
+struct SurfaceBinder {
+    VkCommandBuffer cmd;
+    VkDescriptorSet globalDescriptor;
+    VkExtent2D extent;
+    MaterialPipeline* lastPipeline = nullptr;
+    MaterialInstance* lastMaterial = nullptr;
+    VkBuffer lastIndexBuffer = VK_NULL_HANDLE;
+
+    void bindPipeline(MaterialPipeline* pipeline) {
+        lastPipeline = pipeline;
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->pipeline);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->layout, 0, 1,
+            &globalDescriptor, 0, nullptr);
+
+        VkViewport viewport = {};
+        viewport.x = 0;
+        viewport.y = 0;
+        viewport.width = (float)extent.width;
+        viewport.height = (float)extent.height;
+        viewport.minDepth = 0.f;
+        viewport.maxDepth = 1.f;
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+        VkRect2D scissor = {};
+        scissor.offset.x = 0;
+        scissor.offset.y = 0;
+        scissor.extent = extent;
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
+    }
+
+    void bind(const RenderObject& r) {
+        if (r.material != lastMaterial) {
+            lastMaterial = r.material;
+            if (r.material->pipeline != lastPipeline) {
+                bindPipeline(r.material->pipeline);
+            }
+        }
+        if (r.indexBuffer != lastIndexBuffer) {
+            lastIndexBuffer = r.indexBuffer;
+            vkCmdBindIndexBuffer(cmd, r.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        }
+        GPUDrawPushConstants push_constants{};
+        push_constants.worldMatrix = r.transform;
+        push_constants.vertexBuffer = r.vertexBufferAddress;
+        push_constants.materialBuffer = r.material->materialBuffer;
+        vkCmdPushConstants(cmd, r.material->pipeline->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
+    }
+
+    // The editor guide pipeline replaces the mesh bindings; force a rebind afterwards.
+    void invalidatePipeline() {
+        lastPipeline = nullptr;
+        lastMaterial = nullptr;
+    }
+};
+
+// Dynamic state: opaque pass - back-face cull, depth test+write on
+void setOpaqueState(VkCommandBuffer cmd) {
+    vkCmdSetCullMode(cmd, VK_CULL_MODE_BACK_BIT);
+    vkCmdSetFrontFace(cmd, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    vkCmdSetDepthTestEnable(cmd, VK_TRUE);
+    vkCmdSetDepthWriteEnable(cmd, VK_TRUE);
+    vkCmdSetDepthCompareOp(cmd, VK_COMPARE_OP_GREATER_OR_EQUAL);
+}
+
+// Dynamic state: transparent pass - no cull, depth test on but writes off
+void setTransparentState(VkCommandBuffer cmd) {
+    vkCmdSetCullMode(cmd, VK_CULL_MODE_NONE);
+    vkCmdSetFrontFace(cmd, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    vkCmdSetDepthTestEnable(cmd, VK_TRUE);
+    vkCmdSetDepthWriteEnable(cmd, VK_FALSE);
+    vkCmdSetDepthCompareOp(cmd, VK_COMPARE_OP_GREATER_OR_EQUAL);
+}
+
+} // namespace
+
+void VulkanEngine::writeSceneData()
+{
+    FrameData& frame = getCurrentFrame();
+    GPUSceneData* sceneUniformData = (GPUSceneData*)frame.sceneDataBuffer.allocation->GetMappedData();
+    *sceneUniformData = sceneData;
+    VK_CHECK(vmaFlushAllocation(allocator, frame.sceneDataBuffer.allocation, 0, sizeof(GPUSceneData)));
+}
+
+// CPU path: frustum test, state sort, one direct indexed draw per visible surface.
 void VulkanEngine::drawGeometry(VkCommandBuffer cmd)
 {
     const auto frustumPlanes = frustumCullingEnabled
@@ -597,8 +888,8 @@ void VulkanEngine::drawGeometry(VkCommandBuffer cmd)
 
     // sort the opaque surfaces by material and mesh
     std::sort(opaqueDrawIndices.begin(), opaqueDrawIndices.end(), [&](const auto& iA, const auto& iB) {
-		const RenderObject& A = drawCommands.OpaqueSurfaces[iA];
-		const RenderObject& B = drawCommands.OpaqueSurfaces[iB];
+        const RenderObject& A = drawCommands.OpaqueSurfaces[iA];
+        const RenderObject& B = drawCommands.OpaqueSurfaces[iB];
         if (A.material == B.material) {
             return A.indexBuffer < B.indexBuffer;
         } else {
@@ -606,90 +897,27 @@ void VulkanEngine::drawGeometry(VkCommandBuffer cmd)
         }
     });
 
-    //write the buffer
-    GPUSceneData* sceneUniformData = (GPUSceneData*)getCurrentFrame().sceneDataBuffer.allocation->GetMappedData();
-    *sceneUniformData = sceneData;
-    VK_CHECK(vmaFlushAllocation(allocator, getCurrentFrame().sceneDataBuffer.allocation, 0, sizeof(GPUSceneData)));
+    writeSceneData();
+    SurfaceBinder binder{ cmd, getCurrentFrame().globalDescriptor, drawExtent };
 
-
-    MaterialPipeline* lastPipeline = nullptr;
-    MaterialInstance* lastMaterial = nullptr;
-    VkBuffer lastIndexBuffer = VK_NULL_HANDLE;
-
-    auto bindPipeline = [&](MaterialPipeline* pipeline) {
-        lastPipeline = pipeline;
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->pipeline);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->layout, 0, 1,
-            &getCurrentFrame().globalDescriptor, 0, nullptr);
-
-        VkViewport viewport = {};
-        viewport.x = 0;
-        viewport.y = 0;
-        viewport.width = (float)drawExtent.width;
-        viewport.height = (float)drawExtent.height;
-        viewport.minDepth = 0.f;
-        viewport.maxDepth = 1.f;
-
-        vkCmdSetViewport(cmd, 0, 1, &viewport);
-
-        VkRect2D scissor = {};
-        scissor.offset.x = 0;
-        scissor.offset.y = 0;
-        scissor.extent.width = drawExtent.width;
-        scissor.extent.height = drawExtent.height;
-
-        vkCmdSetScissor(cmd, 0, 1, &scissor);
-    };
-
+    stats.drawcallCount = 0;
+    stats.triangleCount = 0;
     auto draw = [&](const RenderObject& r) {
-        if (r.material != lastMaterial) {
-            lastMaterial = r.material;
-            if (r.material->pipeline != lastPipeline) {
-                bindPipeline(r.material->pipeline);
-            }
-        }
-        if (r.indexBuffer != lastIndexBuffer) {
-            lastIndexBuffer = r.indexBuffer;
-            vkCmdBindIndexBuffer(cmd, r.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-        }
-        // calculate final mesh matrix
-        GPUDrawPushConstants push_constants{};
-        push_constants.worldMatrix = r.transform;
-        push_constants.vertexBuffer = r.vertexBufferAddress;
-        push_constants.materialBuffer = r.material->materialBuffer;
-
-        vkCmdPushConstants(cmd, r.material->pipeline->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
-
+        binder.bind(r);
         stats.drawcallCount++;
         stats.triangleCount += r.indexCount / 3;
         vkCmdDrawIndexed(cmd, r.indexCount, 1, r.firstIndex, 0, 0);
     };
 
-    stats.drawcallCount = 0;
-    stats.triangleCount = 0;
-
-    // Dynamic state: opaque pass — back-face cull, depth test+write on
-    vkCmdSetCullMode(cmd, VK_CULL_MODE_BACK_BIT);
-    vkCmdSetFrontFace(cmd, VK_FRONT_FACE_COUNTER_CLOCKWISE);
-    vkCmdSetDepthTestEnable(cmd, VK_TRUE);
-    vkCmdSetDepthWriteEnable(cmd, VK_TRUE);
-    vkCmdSetDepthCompareOp(cmd, VK_COMPARE_OP_GREATER_OR_EQUAL);
-
+    setOpaqueState(cmd);
     for (auto& r : opaqueDrawIndices) {
         draw(drawCommands.OpaqueSurfaces[r]);
     }
     // Guides use the opaque depth buffer, but do not occlude transparent models.
     editorGuides.draw(cmd, getCurrentFrame().globalDescriptor, sceneData.viewproj, drawExtent);
-    // The guide pipeline replaces the mesh bindings; force a rebind for transparency.
-    lastPipeline = nullptr;
-    lastMaterial = nullptr;
+    binder.invalidatePipeline();
 
-    // Dynamic state: transparent pass — no cull, depth test on but writes off
-    vkCmdSetCullMode(cmd, VK_CULL_MODE_NONE);
-    vkCmdSetFrontFace(cmd, VK_FRONT_FACE_COUNTER_CLOCKWISE);
-    vkCmdSetDepthTestEnable(cmd, VK_TRUE);
-    vkCmdSetDepthWriteEnable(cmd, VK_FALSE);
-    vkCmdSetDepthCompareOp(cmd, VK_COMPARE_OP_GREATER_OR_EQUAL);
+    setTransparentState(cmd);
     std::sort(transparentDraws.begin(), transparentDraws.end(), [](const auto& a, const auto& b) {
         return a.first > b.first;
     });
@@ -698,6 +926,49 @@ void VulkanEngine::drawGeometry(VkCommandBuffer cmd)
     }
 
     // we delete the draw commands now that we processed them
+    drawCommands.OpaqueSurfaces.clear();
+    drawCommands.TransparentSurfaces.clear();
+}
+
+// GPU path. prepareGpuCulling() already built the unculled, sorted lists and the compute pass already
+// wrote instanceCount for every slot (both ran before vkCmdBeginRendering). Slot s is the s-th surface
+// drawn here, so each draw just reads indirect record s. Stats come from the shader's counters instead
+// of being counted here; see collectGpuCullStats().
+void VulkanEngine::drawGeometryGpuCulled(VkCommandBuffer cmd)
+{
+    const uint32_t candidates = static_cast<uint32_t>(
+        drawCommands.OpaqueSurfaces.size() + drawCommands.TransparentSurfaces.size());
+    const uint32_t listed = static_cast<uint32_t>(opaqueDrawIndices.size() + transparentDraws.size());
+    if (listed != candidates || listed != gpuCullSlotCount) {
+        fmt::print("GPU culling slot mismatch: {} candidates, {} listed, {} slots from prepareGpuCulling().\n",
+            candidates, listed, gpuCullSlotCount);
+        abort();
+    }
+
+    writeSceneData();
+    FrameData& frame = getCurrentFrame();
+    SurfaceBinder binder{ cmd, frame.globalDescriptor, drawExtent };
+
+    uint32_t slot = 0;
+    auto draw = [&](const RenderObject& r) {
+        binder.bind(r);
+        vkCmdDrawIndexedIndirect(cmd, frame.indirectBuffer.buffer,
+            sizeof(VkDrawIndexedIndirectCommand) * slot, 1, sizeof(VkDrawIndexedIndirectCommand));
+        slot++;
+    };
+
+    setOpaqueState(cmd);
+    for (auto& r : opaqueDrawIndices) {
+        draw(drawCommands.OpaqueSurfaces[r]);
+    }
+    editorGuides.draw(cmd, frame.globalDescriptor, sceneData.viewproj, drawExtent);
+    binder.invalidatePipeline();
+
+    setTransparentState(cmd);
+    for (auto& [distance, index] : transparentDraws) {
+        draw(drawCommands.TransparentSurfaces[index]);
+    }
+
     drawCommands.OpaqueSurfaces.clear();
     drawCommands.TransparentSurfaces.clear();
 }
@@ -1166,6 +1437,7 @@ void VulkanEngine::initPipelines()
     // COMPUTE PIPELINES
     initBackgroundPipelines();
     initPostProcessPipeline();
+    initCullPipeline();
 
     meshPipelines.buildPipelines(this);
     editorGuides.init(device, gpuSceneDataDescriptorLayout, drawImage.imageFormat, depthImage.imageFormat);
@@ -1190,6 +1462,13 @@ void VulkanEngine::initDescriptors()
     }
     {
         DescriptorLayoutBuilder builder;
+        builder.addBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        builder.addBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        builder.addBinding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        cullDescriptorLayout = builder.build(device, VK_SHADER_STAGE_COMPUTE_BIT);
+    }
+    {
+        DescriptorLayoutBuilder builder;
         builder.addBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
         builder.addBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_GLOBAL_TEXTURES); // Global texture array
 
@@ -1208,7 +1487,18 @@ void VulkanEngine::initDescriptors()
 
     for (int i = 0; i < FRAME_OVERLAP; i++) {
         frames[i].globalDescriptor = globalDescriptorAllocator.allocate(device, gpuSceneDataDescriptorLayout);
+        frames[i].cullDescriptor = globalDescriptorAllocator.allocate(device, cullDescriptorLayout);
         frames[i].sceneDataBuffer = vkutil::createBuffer(allocator, sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, vkutil::HOST_WRITE_MAPPED);
+        frames[i].cullStatsBuffer = vkutil::createBuffer(allocator, sizeof(GPUCullStats), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
+        VkDescriptorBufferInfo statsInfo{ frames[i].cullStatsBuffer.buffer, 0, VK_WHOLE_SIZE };
+        VkWriteDescriptorSet statsWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        statsWrite.dstSet = frames[i].cullDescriptor;
+        statsWrite.dstBinding = 2;
+        statsWrite.descriptorCount = 1;
+        statsWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        statsWrite.pBufferInfo = &statsInfo;
+        vkUpdateDescriptorSets(device, 1, &statsWrite, 0, nullptr);
 
         VkDescriptorBufferInfo bufInfo{};
         bufInfo.buffer = frames[i].sceneDataBuffer.buffer;

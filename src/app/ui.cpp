@@ -349,6 +349,9 @@ void Editor::handleUi(VulkanEngine* engine, Camera& camera)
             ImGui::MenuItem("Frustum culling", nullptr, &engine->frustumCullingEnabled);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Disable to compare rendering and draw counts without frustum culling.");
+            ImGui::MenuItem("GPU culling", nullptr, &engine->useGpuCulling);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("A compute shader decides visibility. Every candidate is submitted with instanceCount 0 or 1.\nStats show the shader's counts of visible draws and triangles, read back two frames late.\nIgnores the CPU Frustum culling toggle.");
             if (ImGui::MenuItem("Reset Layout")) state.resetLayout = true;
             ImGui::EndMenu();
         }
