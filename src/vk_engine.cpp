@@ -1410,13 +1410,3 @@ void VulkanEngine::forgetGlobalSampler(VkSampler sampler)
 {
     std::erase_if(globalTextureSlots, [sampler](const auto& entry) { return entry.first.second == sampler; });
 }
-
-
-
-
-
-
-
-
-
-

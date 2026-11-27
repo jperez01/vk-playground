@@ -8,6 +8,13 @@ add_library(stb_image INTERFACE)
 
 add_subdirectory(fastgltf)
 add_subdirectory(fmt EXCLUDE_FROM_ALL)
+
+# SDL 2.28 defaults to SDL_LIBC=OFF on MSVC and links with /NODEFAULTLIB.
+# On ARM64, unoptimized (/Od) builds lower _Interlocked* intrinsics to CRT
+# helper calls, so the Debug link fails without the C runtime.
+if(MSVC AND CMAKE_C_COMPILER_ARCHITECTURE_ID STREQUAL "ARM64")
+  set(SDL_LIBC ON CACHE BOOL "Use the system C library" FORCE)
+endif()
 add_subdirectory(SDL EXCLUDE_FROM_ALL)
 
 target_sources(vkbootstrap PRIVATE 
